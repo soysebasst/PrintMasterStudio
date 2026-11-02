@@ -16,9 +16,11 @@ from printmaster.core.color import edge_color
 from printmaster.core.image_analyzer import Diagnosis, rerate
 from printmaster.core.image_analyzer import analyze as analyze_image
 from printmaster.core.image_loader import ImageLoadError, collect_images, load_proxy, probe
+from printmaster.core.layout import page_size_mm
 from printmaster.core.layout import plan as make_plan
 from printmaster.core.naming import NamingOptions, output_path, unique_path
 from printmaster.core.pdf_writer import ExportOptions, PdfExportError, write_pdf
+from printmaster.core.pricing import suggest_price
 from printmaster.domain.models import (
     Background,
     BackgroundKind,
@@ -59,6 +61,7 @@ class JobParams:
     background: Background
     naming: NamingOptions
     export_options: ExportOptions
+    length_step_mm: int = 50
 
 
 @dataclass
@@ -74,7 +77,9 @@ class JobController:
         self.settings = settings
         self.profile = profile
         self.items: list[JobItem] = []
-        self.spec = PrintSpec(Decimal(600), Decimal(900), ppi=settings.default_ppi)
+        self.spec = PrintSpec(Decimal(settings.roll_width_mm), Decimal(900),
+                              ppi=settings.default_ppi,
+                              orientation=settings.default_orientation)
         self.mode: FitMode = settings.default_mode
         self.background = Background()
         self.export_options = ExportOptions()
@@ -144,7 +149,8 @@ class JobController:
             return
         # El PPI efectivo no depende del fondo: se planifica con fondo blanco para no
         # decodificar la imagen (el color de borde requiere leerla).
-        p = make_plan(item.info, self.spec, self.mode, Background(), item.crop)
+        p = make_plan(item.info, self.spec, self.mode, Background(), item.crop,
+                      self.settings.length_step_mm)
         item.diagnosis = rerate(item.diagnosis, p.effective_ppi)
 
     def set_spec(self, spec: PrintSpec) -> None:
@@ -182,8 +188,38 @@ class JobController:
             (k for k, it in enumerate(self.items) if it.info is not None), None)
         if idx is None or self.items[idx].info is None:
             return validate(base, self.profile)
-        info = self.items[idx].info
-        return validate(base.resolved_for(info.width_px, info.height_px), self.profile)
+        return validate(self._page_spec(idx, base, self.mode, self.settings.length_step_mm),
+                        self.profile)
+
+    def _page_spec(self, i: int, spec: PrintSpec, mode: FitMode, step: int) -> PrintSpec:
+        """Formato de página ya resuelto para el ítem (largo automático incluido)."""
+        info = self.items[i].info
+        assert info is not None
+        w, h = page_size_mm(info, spec, mode, step)
+        return replace(spec, width_mm=w, height_mm=h)
+
+    def page_size_for(self, i: int) -> tuple[Decimal, Decimal]:
+        info = self.items[i].info
+        if info is None:
+            raise ValueError(self.items[i].error or "La imagen no se pudo leer.")
+        return page_size_mm(info, self.spec, self.mode, self.settings.length_step_mm)
+
+    def price_for(self, i: int) -> int | None:
+        if self.items[i].info is None:
+            return None
+        w, h = self.page_size_for(i)
+        return suggest_price(w, h, self.settings.pricing())
+
+    def total_price(self, indices: Iterable[int] | None = None) -> tuple[int, int]:
+        targets = range(len(self.items)) if indices is None else indices
+        count = total = 0
+        for i in targets:
+            item = self.items[i]
+            if item.info is None or item.status == ItemStatus.ERROR:
+                continue
+            count += 1
+            total += self.price_for(i) or 0
+        return count, total
 
     def _resolved_background(self, item: JobItem, bg: Background | None = None) -> Background:
         bg = bg if bg is not None else self.background
@@ -195,7 +231,7 @@ class JobController:
 
     def current_params(self) -> JobParams:
         return JobParams(self.spec, self.mode, self.background, self.naming,
-                         self.export_options)
+                         self.export_options, self.settings.length_step_mm)
 
     def plan_for(self, i: int, params: JobParams | None = None,
                  crop: CropOffset | None = None) -> RenderPlan:
@@ -205,7 +241,7 @@ class JobController:
         params = params or self.current_params()
         bg = self._resolved_background(item, params.background)
         return make_plan(item.info, params.spec, params.mode, bg,
-                         crop if crop is not None else item.crop)
+                         crop if crop is not None else item.crop, params.length_step_mm)
 
     # --- diagnóstico y aprobación ---------------------------------------------------
     def analyze(self, i: int) -> Diagnosis:
@@ -222,7 +258,8 @@ class JobController:
             raise
         diag = analyze_image(item.info, proxy, p.effective_ppi)
         # Los parámetros pudieron cambiar durante el análisis: calificar con los actuales.
-        current = make_plan(item.info, self.spec, self.mode, Background(), item.crop)
+        current = make_plan(item.info, self.spec, self.mode, Background(), item.crop,
+                            self.settings.length_step_mm)
         diag = rerate(diag, current.effective_ppi)
         item.diagnosis = diag
         if item.status in (ItemStatus.PENDING, ItemStatus.ANALYZED, ItemStatus.READY,
@@ -280,7 +317,7 @@ class JobController:
                 if item.info is None:
                     raise ValueError(item.error or "La imagen no se pudo leer.")
                 own_errors = [x for x in validate(
-                    params.spec.resolved_for(item.info.width_px, item.info.height_px),
+                    self._page_spec(i, params.spec, params.mode, params.length_step_mm),
                     self.profile) if x.level == "error"]
                 if own_errors:
                     raise ValueError(own_errors[0].message)
