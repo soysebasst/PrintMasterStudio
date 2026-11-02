@@ -37,6 +37,7 @@ include = ["src/printmaster/**/*.py", "src/printmaster/**/*.json", "src/printmas
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 qt_api = "pyside6"
 markers = ["ui: pruebas de interfaz"]
 
