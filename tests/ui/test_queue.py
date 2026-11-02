@@ -63,15 +63,42 @@ def test_move_rows(setup):
     assert [it.path.name for it in ctrl.items] == ["f1.jpg", "f2.jpg", "f0.jpg"]
 
 
-def test_up_down_buttons(setup, qtbot):
+def test_move_up_down(setup, qtbot):
     ctrl, model, view, paths = setup
     drop(view, paths)
     view.list.setCurrentIndex(model.index(2))
-    qtbot.mouseClick(view.up_btn, Qt.LeftButton)
+    view.up_action.trigger()
     assert [it.path.name for it in ctrl.items] == ["f0.jpg", "f2.jpg", "f1.jpg"]
     assert view.list.currentIndex().row() == 1
-    qtbot.mouseClick(view.down_btn, Qt.LeftButton)
+    view.down_action.trigger()
     assert [it.path.name for it in ctrl.items] == ["f0.jpg", "f1.jpg", "f2.jpg"]
+
+
+def test_context_menu_actions(setup):
+    ctrl, model, view, paths = setup
+    assert [a.text() for a in view.context_menu.actions()] == [
+        "Quitar", "Subir", "Bajar", "Abrir carpeta"]
+
+
+def test_roles(setup, make_image, tmp_path):
+    from printmaster.ui.models.queue_model import SizePriceRole, StatusTextRole
+    ctrl, model, view, paths = setup
+    low = make_image("baja.jpg", size=(236, 420), folder=tmp_path / "x")
+    bad = tmp_path / "x" / "roto.jpg"
+    bad.write_bytes(b"x" * 50)
+    view.add_paths([low, bad])
+    ctrl.analyze(0)
+    assert model.data(model.index(0), StatusTextRole) == "Mejorar"
+    assert model.data(model.index(1), StatusTextRole) == "Error"
+    assert "$" in model.data(model.index(0), SizePriceRole)
+    ctrl.approve(0)
+    assert model.data(model.index(0), StatusTextRole) == "Aprobada"
+
+
+def test_icon_mode(setup):
+    from PySide6.QtWidgets import QListView
+    ctrl, model, view, paths = setup
+    assert view.list.viewMode() == QListView.IconMode
 
 
 def test_current_changed_signal(setup, qtbot):

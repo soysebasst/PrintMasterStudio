@@ -17,6 +17,9 @@ from printmaster.ui.workers import run_async
 StatusRole = Qt.UserRole + 1
 LevelRole = Qt.UserRole + 2
 EnhancedRole = Qt.UserRole + 3  # "enhancing" | "enhanced" (IA) | "basic" | None
+StatusTextRole = Qt.UserRole + 4  # estado en palabras para la tarjeta
+SizePriceRole = Qt.UserRole + 5  # "60×110 · $17.000"
+OriginRole = Qt.UserRole + 6  # "IA" | "Gemini" | "Básica" | None
 
 
 def _placeholder(color: str) -> QIcon:
@@ -82,6 +85,16 @@ class QueueModel(QAbstractListModel):
             return item.status
         if role == LevelRole:
             return item.diagnosis.level if item.diagnosis else None
+        if role == StatusTextRole:
+            return self._status_text(index.row())
+        if role == SizePriceRole:
+            return self._size_price(index.row())
+        if role == OriginRole:
+            if not item.uses_enhanced or item.enhanced is None:
+                return None
+            if item.enhanced.engine.startswith("Gemini"):
+                return "Gemini"
+            return "IA" if item.enhanced.engine == ENGINE_AI else "Básica"
         if role == EnhancedRole:
             if item.enhancing:
                 return "enhancing"
@@ -89,6 +102,35 @@ class QueueModel(QAbstractListModel):
                 return None
             return "enhanced" if item.enhanced.engine == ENGINE_AI else "basic"
         return None
+
+    def _status_text(self, row: int) -> str:
+        from printmaster.domain.models import ItemStatus
+        from printmaster.domain.quality import QualityLevel
+        item = self.controller.items[row]
+        if item.status == ItemStatus.ERROR or item.info is None:
+            return "Error"
+        if item.status == ItemStatus.EXPORTED:
+            return "PDF listo"
+        if item.status == ItemStatus.APPROVED:
+            return "Aprobada"
+        if item.enhancing:
+            return "Mejorando…"
+        if item.diagnosis is None:
+            return "Analizando…"
+        low = item.diagnosis.level in (QualityLevel.BAJA, QualityLevel.MUY_BAJA)
+        if (low and not item.uses_enhanced) or self.controller.needs_enhancement(row) > 0:
+            return "Mejorar"
+        return "Lista"
+
+    def _size_price(self, row: int) -> str:
+        if self.controller.items[row].info is None:
+            return "—"
+        if self.controller.has_errors(row):
+            return "Tamaño no válido"
+        w, h = (f"{(v / 10).normalize():f}".replace(".", ",")
+                for v in self.controller.page_size_for(row))
+        price = self.controller.price_for(row)
+        return f"{w}×{h} cm · {format_cop(price)}" if price is not None else f"{w}×{h} cm"
 
     def flags(self, index: QModelIndex):
         base = super().flags(index)
