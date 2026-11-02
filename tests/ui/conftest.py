@@ -17,3 +17,11 @@ def settings(tmp_path):
     s = load_settings()
     s.output_dir = tmp_path / "salida"
     return s
+
+
+@pytest.fixture(autouse=True)
+def drain_thread_pool():
+    """Que ninguna tarea de fondo de una prueba se filtre a la siguiente."""
+    yield
+    from PySide6.QtCore import QThreadPool
+    QThreadPool.globalInstance().waitForDone(15000)

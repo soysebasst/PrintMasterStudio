@@ -42,10 +42,13 @@ def test_two_passes_and_cache(fake_engine_cmd, tmp_path, make_image, log):
     assert r2.path == r.path and len(lines(log)) == 2
 
 
-def test_max_side_limit(fake_engine_cmd, tmp_path, make_image, log):
-    src = make_image("g.png", size=(4000, 3000))
+def test_max_side_limit(fake_engine_cmd, tmp_path, make_image, log, monkeypatch):
+    from printmaster.core.enhance import enhancer as enh_mod
+    monkeypatch.setattr(enh_mod, "MAX_SIDE_PX", 1200)  # misma lógica que 12000, más rápido
+    src = make_image("g.png", size=(400, 300))
     r = Enhancer(RealEsrgan(fake_engine_cmd), tmp_path / "c").enhance(src, "big", 2, MODEL_PHOTO)
-    assert max(Image.open(r.path).size) <= 12000
+    assert max(Image.open(r.path).size) <= 1200
+    assert len(lines(log)) == 1  # la segunda pasada superaría el tope: se omite
 
 
 def test_without_engine_uses_basic(tmp_path, make_image):

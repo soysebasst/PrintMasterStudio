@@ -22,12 +22,17 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from printmaster.core.enhance.installer import find_engine, install_engine
+from printmaster.core.enhance.realesrgan import RealEsrgan
 from printmaster.domain.units import Unit
+from printmaster.infra import paths
 from printmaster.infra.settings import Settings, save_settings
+from printmaster.ui.workers import run_async
 
 
 class SettingsPage(QWidget):
     settings_changed = Signal(object)  # Settings
+    engine_changed = Signal()
 
     def __init__(self, settings: Settings, parent=None) -> None:
         super().__init__(parent)
@@ -74,6 +79,46 @@ class SettingsPage(QWidget):
         form2.addRow("Unidad:", self.unit_combo)
         lay.addWidget(defaults_box)
 
+        price_box = QGroupBox("Precios y lámina")
+        form3 = QFormLayout(price_box)
+        self.roll_width_spin = QSpinBox()
+        self.roll_width_spin.setRange(21, 61)
+        self.roll_width_spin.setSuffix(" cm")
+        self.roll_width_spin.setValue(round(self.settings.roll_width_mm / 10))
+        form3.addRow("Ancho del rollo:", self.roll_width_spin)
+        self.price_short_spin = self._money(self.settings.price_short)
+        form3.addRow(f"Precio 60 × {self.settings.ref_short_mm // 10} cm:", self.price_short_spin)
+        self.price_long_spin = self._money(self.settings.price_long)
+        form3.addRow(f"Precio 60 × {self.settings.ref_long_mm // 10} cm:", self.price_long_spin)
+        self.min_price_spin = self._money(self.settings.min_price)
+        form3.addRow("Precio mínimo:", self.min_price_spin)
+        lay.addWidget(price_box)
+
+        ai_box = QGroupBox("Mejora con IA")
+        form4 = QFormLayout(ai_box)
+        self.enhance_check = QCheckBox("Mejorar automáticamente imágenes de baja calidad")
+        self.enhance_check.setChecked(self.settings.enhance_enabled)
+        form4.addRow("", self.enhance_check)
+        self.target_ppi_spin = QSpinBox()
+        self.target_ppi_spin.setRange(72, 300)
+        self.target_ppi_spin.setSuffix(" PPI")
+        self.target_ppi_spin.setValue(self.settings.enhance_target_ppi)
+        form4.addRow("Resolución objetivo:", self.target_ppi_spin)
+        self.engine_status_label = QLabel("")
+        self.engine_status_label.setWordWrap(True)
+        form4.addRow("Motor Real-ESRGAN:", self.engine_status_label)
+        engine_row = QHBoxLayout()
+        self.install_engine_btn = QPushButton("Instalar motor de mejora")
+        self.test_engine_btn = QPushButton("Probar motor")
+        engine_row.addWidget(self.install_engine_btn)
+        engine_row.addWidget(self.test_engine_btn)
+        engine_row.addStretch(1)
+        form4.addRow("", engine_row)
+        self.install_engine_btn.clicked.connect(self._install_engine)
+        self.test_engine_btn.clicked.connect(self._test_engine)
+        lay.addWidget(ai_box)
+        self._refresh_engine_status()
+
         fav_box = QGroupBox("Formatos favoritos")
         fav_lay = QVBoxLayout(fav_box)
         self.favorites_list = QListWidget()
@@ -92,6 +137,64 @@ class SettingsPage(QWidget):
         bottom.addWidget(self.save_btn)
         lay.addLayout(bottom)
         self._fill_favorites()
+
+    @staticmethod
+    def _money(value: int) -> QSpinBox:
+        spin = QSpinBox()
+        spin.setRange(0, 10_000_000)
+        spin.setSingleStep(500)
+        spin.setPrefix("$ ")
+        spin.setGroupSeparatorShown(True)
+        spin.setValue(value)
+        return spin
+
+    # --- motor de mejora ------------------------------------------------------------
+    def _refresh_engine_status(self, message: str | None = None) -> None:
+        if message is not None:
+            self.engine_status_label.setText(message)
+        elif find_engine() is None:
+            self.engine_status_label.setText("No instalado. Sin él se usa la mejora básica.")
+        else:
+            self.engine_status_label.setText("Instalado (pulse «Probar motor» para verificarlo).")
+
+    def _set_engine_busy(self, busy: bool, text: str = "") -> None:
+        self.install_engine_btn.setEnabled(not busy)
+        self.test_engine_btn.setEnabled(not busy)
+        if text:
+            self.engine_status_label.setText(text)
+
+    @staticmethod
+    def _install_and_test() -> tuple[bool, str]:
+        exe = install_engine()
+        return RealEsrgan([str(exe)]).self_test(paths.data_dir() / "cache" / "selftest")
+
+    @staticmethod
+    def _run_self_test() -> tuple[bool, str]:
+        engine = find_engine()
+        if engine is None:
+            return False, "No instalado. Sin él se usa la mejora básica."
+        return engine.self_test(paths.data_dir() / "cache" / "selftest")
+
+    def _install_engine(self) -> None:
+        self._set_engine_busy(True, "Descargando e instalando el motor (≈45 MB)…")
+        run_async(self._install_and_test, on_done=self._engine_result,
+                  on_failed=self._engine_failed, owner=self)
+
+    def _test_engine(self) -> None:
+        self._set_engine_busy(True, "Probando el motor…")
+        run_async(self._run_self_test, on_done=self._engine_result,
+                  on_failed=self._engine_failed, owner=self)
+
+    def _engine_result(self, result: tuple[bool, str]) -> None:
+        ok, message = result
+        self._set_engine_busy(False)
+        self._refresh_engine_status(("✓ " if ok else "✕ ") + message)
+        self.engine_changed.emit()
+
+    def _engine_failed(self, message: str) -> None:
+        self._set_engine_busy(False)
+        self._refresh_engine_status(f"✕ {message}")
+        self.engine_changed.emit()
 
     def _fill_favorites(self) -> None:
         self.favorites_list.clear()
@@ -123,6 +226,12 @@ class SettingsPage(QWidget):
         s.naming_by_date = self.by_date_check.isChecked()
         s.default_ppi = self.ppi_spin.value()
         s.default_unit = Unit(self.unit_combo.currentData())
+        s.roll_width_mm = self.roll_width_spin.value() * 10
+        s.price_short = self.price_short_spin.value()
+        s.price_long = self.price_long_spin.value()
+        s.min_price = self.min_price_spin.value()
+        s.enhance_enabled = self.enhance_check.isChecked()
+        s.enhance_target_ppi = self.target_ppi_spin.value()
         save_settings(s)
         self.status_label.setText("Configuración guardada.")
         self.settings_changed.emit(s.model_copy(deep=True))

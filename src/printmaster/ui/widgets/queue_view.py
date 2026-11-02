@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 from printmaster.core.image_loader import SUPPORTED_EXTENSIONS
 from printmaster.domain.models import ItemStatus
 from printmaster.domain.quality import QualityLevel
-from printmaster.ui.models.queue_model import LevelRole, QueueModel, StatusRole
+from printmaster.ui.models.queue_model import EnhancedRole, LevelRole, QueueModel, StatusRole
 
 _LEVEL_BADGES = {
     QualityLevel.EXCELENTE: ("● Exc", "#2e9d5b"),
@@ -35,6 +35,18 @@ _LEVEL_BADGES = {
 class BadgeDelegate(QStyledItemDelegate):
     def paint(self, painter: QPainter, option, index: QModelIndex) -> None:
         super().paint(painter, option, index)
+        enhanced = index.data(EnhancedRole)
+        if enhanced:
+            painter.save()
+            r = option.rect
+            ia = QRect(r.right() - 74, r.top() + 26, 40, 18)
+            painter.setRenderHint(QPainter.Antialiasing)
+            painter.setBrush(QColor("#8e44ad"))
+            painter.setPen(Qt.NoPen)
+            painter.drawRoundedRect(ia, 4, 4)
+            painter.setPen(QColor("white"))
+            painter.drawText(ia, Qt.AlignCenter, "…IA" if enhanced == "enhancing" else "IA")
+            painter.restore()
         status = index.data(StatusRole)
         level = index.data(LevelRole)
         if status == ItemStatus.ERROR:

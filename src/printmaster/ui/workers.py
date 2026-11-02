@@ -27,12 +27,15 @@ class Worker(QRunnable):
 
     def run(self) -> None:
         try:
-            result = self.fn(*self.args, **self.kwargs)
-        except Exception as exc:  # noqa: BLE001 - se informa a la interfaz
-            log.error("Tarea en segundo plano falló: %s\n%s", exc, traceback.format_exc())
-            self.signals.failed.emit(str(exc))
-        else:
-            self.signals.done.emit(result)
+            try:
+                result = self.fn(*self.args, **self.kwargs)
+            except Exception as exc:  # noqa: BLE001 - se informa a la interfaz
+                log.error("Tarea en segundo plano falló: %s\n%s", exc, traceback.format_exc())
+                self.signals.failed.emit(str(exc))
+            else:
+                self.signals.done.emit(result)
+        except RuntimeError:
+            pass  # la aplicación se está cerrando: ya no hay a quién avisar
         finally:
             _alive.discard(self)
 

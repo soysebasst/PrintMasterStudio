@@ -45,6 +45,7 @@ class MainWindow(QMainWindow):
         self.home_page.new_job_requested.connect(lambda: self.nav.setCurrentRow(1))
         self.home_page.favorite_chosen.connect(self._on_favorite_chosen)
         self.settings_page.settings_changed.connect(self._on_settings_changed)
+        self.settings_page.engine_changed.connect(self.job_page.reload_engine)
         self.nav.setCurrentRow(0)
 
     def _make_job_page(self) -> JobPage:

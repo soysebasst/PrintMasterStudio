@@ -48,7 +48,8 @@ def test_full_flow(page, qtbot, make_image, tmp_path, settings):
     qtbot.waitUntil(lambda: all_ready(page, 3), timeout=10000)
     qtbot.mouseClick(page.approve_all_btn, Qt.LeftButton)
     assert any("Se omitieron 1 imágenes" in m for m in page.messages if isinstance(m, str))
-    assert page.export_btn.isEnabled()
+    # la imagen chica se mejora en segundo plano; exportar se habilita al terminar
+    qtbot.waitUntil(page.export_btn.isEnabled, timeout=20000)
     qtbot.mouseClick(page.export_btn, Qt.LeftButton)
     qtbot.waitUntil(lambda: any(isinstance(m, tuple) for m in page.messages), timeout=15000)
     ok, err, folder = next(m for m in page.messages if isinstance(m, tuple))
