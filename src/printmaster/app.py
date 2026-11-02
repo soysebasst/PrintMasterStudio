@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import logging
 import sys
+from importlib import resources
 
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from printmaster.infra.logging_setup import setup_logging
@@ -28,6 +30,8 @@ def _install_excepthook() -> None:
 def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName("PrintMaster Studio")
+    icon = resources.files("printmaster.ui").joinpath("assets/printmaster.ico")
+    app.setWindowIcon(QIcon(str(icon)))
     setup_logging()
     _install_excepthook()
     apply_dark_theme(app)

@@ -29,11 +29,15 @@ dev = [
 [project.scripts]
 printmaster = "printmaster.app:main"
 
+[project.gui-scripts]
+printmaster-studio = "printmaster.app:main"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/printmaster"]
 
 [tool.hatch.build]
-include = ["src/printmaster/**/*.py", "src/printmaster/**/*.json", "src/printmaster/**/*.qss"]
+include = ["src/printmaster/**/*.py", "src/printmaster/**/*.json", "src/printmaster/**/*.qss",
+           "src/printmaster/**/*.ico", "src/printmaster/**/*.png"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
