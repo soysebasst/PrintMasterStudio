@@ -248,6 +248,7 @@ class Inspector(QWidget):
         self.height_spin.blockSignals(True)
         self.height_spin.setValue(self._display(Decimal(mm)))
         self.height_spin.blockSignals(False)
+        self.height_spin.lineEdit().setCursorPosition(0)  # que se vea el número, no el final
 
     def set_enhance_choice(self, choice: EnhanceChoice) -> None:
         self.enhance_combo.blockSignals(True)
@@ -302,8 +303,6 @@ class Inspector(QWidget):
         self.background_label.setVisible(fill)
         auto = self.mode_combo.currentData() == FitMode.FIT_LENGTH
         self.height_spin.setReadOnly(auto)
-        self.height_spin.setButtonSymbols(QDoubleSpinBox.NoButtons if auto
-                                          else QDoubleSpinBox.UpDownArrows)
         self.height_spin.setSuffix(" (calculado)" if auto else "")
         if not auto:
             self._refresh_spins()

@@ -5,7 +5,7 @@ optimizado para el plotter **Epson SureColor SC-T3170** (rollo de hasta 610 mm).
 
 Estado: **Fase 1** (aplicación funcional básica). Ver `PROGRESS.md`.
 
-## Qué hace (Fase 1)
+## Qué hace
 
 - Carga múltiple: arrastrar y soltar archivos o carpetas, `+ Archivos`, `+ Carpeta`. Admite JPG, PNG, WEBP, BMP y TIFF.
 - Diagnóstico por imagen: PPI efectivo en el tamaño elegido, nitidez, ruido, compresión JPEG y clasificación de calidad.
@@ -13,6 +13,8 @@ Estado: **Fase 1** (aplicación funcional básica). Ver `PROGRESS.md`.
 - Tres modos: **Ajustar sin recortar**, **Rellenar** (blanco, color, color del borde o difuminado) y **Recortar** (con recorte arrastrable).
 - Vista previa a escala que usa el mismo cálculo que el PDF.
 - PDF exactos: página en puntos exactos, sin márgenes añadidos y `PrintScaling=None`. El JPEG va sin recomprimir cuando es posible, sin pérdida en los demás casos, y con el perfil ICC incrustado.
+- **Lámina de 60 cm con largo automático**: la imagen sale completa, sin recortes ni sobrantes grandes. Muestra el **precio sugerido** por pieza y el total del lote.
+- **Mejora con IA local** (Real-ESRGAN) para imágenes de baja calidad, con comparación antes/después. El motor se instala desde *Configuración*.
 - Nunca modifica ni borra los archivos originales.
 
 ## Instalar y ejecutar (Windows, PowerShell)

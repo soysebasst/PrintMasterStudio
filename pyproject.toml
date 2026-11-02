@@ -39,7 +39,8 @@ include = ["src/printmaster/**/*.py", "src/printmaster/**/*.json", "src/printmas
 testpaths = ["tests"]
 pythonpath = ["."]
 qt_api = "pyside6"
-markers = ["ui: pruebas de interfaz"]
+markers = ["ui: pruebas de interfaz", "gpu: requiere el motor Real-ESRGAN real instalado"]
+addopts = "-m \"not gpu\""
 
 [tool.ruff]
 line-length = 100

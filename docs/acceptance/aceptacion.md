@@ -57,3 +57,38 @@ py -3.12 -m venv .venv
 | Fallos o cosas incómodas | |
 
 Cuando termines, envíame esta tabla. La Fase 1 se da por cerrada solo con tu confirmación.
+
+---
+
+# Fase 2A — Lámina de 60 cm, precio sugerido y mejora con IA
+
+## 1. Actualizar
+
+```powershell
+cd C:\PrintMaster
+git pull
+.venv\Scripts\pip install -e ".[dev]"
+.venv\Scripts\python -m printmaster
+```
+
+## 2. Instalar el motor de mejora (una sola vez)
+
+- [ ] *Configuración › Mejora con IA › **Instalar motor de mejora*** (descarga ≈45 MB del sitio oficial de Real-ESRGAN).
+- [ ] Anota el mensaje que aparece: **"✓ Motor listo"** o el aviso de que el equipo no tiene aceleración compatible (en ese caso se usa la mejora básica).
+- [ ] Opcional, para verificar el motor real: `.venv\Scripts\pytest -m gpu -q`. Debe decir `1 passed`.
+
+## 3. Probar con tus dos imágenes
+
+- [ ] Carga la del planeta (554×554) y la de "Respeto" (236×420).
+- [ ] El modo es **"Ajustar largo a la imagen"**. El planeta queda en **60 × 60 cm · $12.000** y Respeto en **60 × 110 cm · $17.000**. Abajo dice **"2 láminas · $29.000"**.
+- [ ] Cada imagen muestra la insignia **IA** al terminar de mejorarse. Usa **Ver original / Ver mejorada** para comparar.
+- [ ] Anota cuánto tarda la mejora de cada una.
+- [ ] Exporta, abre el PDF en Acrobat (60 × 110 cm) e imprime "Respeto" a **"Tamaño real"**. Compara la calidad con la impresión de la Fase 1.
+
+| Dato | Valor |
+|---|---|
+| Mensaje del motor | |
+| Tiempo de mejora (planeta / respeto) | |
+| ¿Se ve mejor impresa? | |
+| Medida real de la pieza | |
+| Comentarios | |
