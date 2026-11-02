@@ -100,3 +100,46 @@ def test_diagnosis_card(qtbot):
     assert "Muy baja resolución" in text and "PPI" in text and "800×600" in text
     card.show_diagnosis(diag, info, downsample_ppi=200)
     assert "Se reducirá a 200 PPI" in card.text()
+
+
+def test_defaults_fit_length_60(insp):
+    assert insp.mode() == FitMode.FIT_LENGTH
+    assert insp.spec().width_mm == D(600)
+
+
+def test_height_readonly_in_fit_length(insp):
+    assert insp.height_spin.isReadOnly()
+    insp.mode_combo.setCurrentIndex(insp.mode_combo.findData(FitMode.CONTAIN))
+    assert not insp.height_spin.isReadOnly()
+
+
+def test_calculated_length(insp):
+    insp.set_calculated_length(D(1100))
+    assert insp.height_spin.value() == 110
+    assert "calculado" in insp.height_spin.suffix()
+
+
+def test_enhance_choice_signal(insp, qtbot):
+    from printmaster.domain.models import EnhanceChoice
+    with qtbot.waitSignal(insp.enhance_choice_changed) as blocker:
+        insp.enhance_combo.setCurrentIndex(insp.enhance_combo.findData(EnhanceChoice.OFF))
+    assert blocker.args == [EnhanceChoice.OFF]
+
+
+def test_card_price_and_enhanced(qtbot):
+    from printmaster.core.enhance.enhancer import EnhanceResult
+    card = DiagnosisCard()
+    qtbot.addWidget(card)
+    diag = Diagnosis(160.0, QualityLevel.ACEPTABLE, QualityLevel.ACEPTABLE, 10.0, 1.0, 1.0, None,
+                     (), "Conservar la imagen original.")
+    info = ImageInfo(Path("a.jpg"), "JPEG", 236, 420, "RGB", False, None, 1, 1000, "")
+    einfo = ImageInfo(Path("e.png"), "PNG", 3776, 6720, "RGB", False, None, 1, 1000, "")
+    res = EnhanceResult(Path("e.png"), "realesrgan-x4plus-anime", 2, "Real-ESRGAN")
+    card.show_diagnosis(diag, info, price=17000, page_mm=(D(600), D(1100)),
+                        enhanced=(einfo, res))
+    t = card.text()
+    assert "60 × 110 cm" in t and "$17.000" in t
+    assert "Mejorada con IA" in t and "3776×6720" in t
+    assert "alta resolución" not in t.lower()
+    card.show_diagnosis(diag, info, enhancing=True)
+    assert "Mejorando con IA" in card.text()

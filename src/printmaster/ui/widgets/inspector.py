@@ -21,7 +21,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from printmaster.domain.models import Background, BackgroundKind, FitMode, Orientation, PrintSpec
+from printmaster.domain.models import (
+    Background,
+    BackgroundKind,
+    EnhanceChoice,
+    FitMode,
+    Orientation,
+    PrintSpec,
+)
 from printmaster.domain.units import Unit, from_mm, to_mm
 from printmaster.infra.settings import FavoriteFormat, Settings
 from printmaster.printers.profiles import ValidationIssue
@@ -44,13 +51,21 @@ BACKGROUND_LABELS = [
 ]
 
 
+ENHANCE_LABELS = [
+    (EnhanceChoice.AUTO, "Mejora: Automática"),
+    (EnhanceChoice.ON, "Mejorar con IA"),
+    (EnhanceChoice.OFF, "No mejorar"),
+]
+
+
 class Inspector(QWidget):
     changed = Signal()
     favorite_saved = Signal(object)  # FavoriteFormat
+    enhance_choice_changed = Signal(object)  # EnhanceChoice
 
     def __init__(self, settings: Settings, parent=None) -> None:
         super().__init__(parent)
-        self._w_mm = Decimal(600)
+        self._w_mm = Decimal(settings.roll_width_mm)
         self._h_mm = Decimal(900)
         self._unit = Unit(settings.default_unit)
         self._color: tuple[int, int, int] = (255, 255, 255)
@@ -120,6 +135,12 @@ class Inspector(QWidget):
         for kind, label in BACKGROUND_LABELS:
             self.background_combo.addItem(label, kind)
         form2.addRow(self.background_label, self.background_combo)
+        self.enhance_combo = QComboBox()
+        self.enhance_combo.setObjectName("enhance_combo")
+        for choice, label in ENHANCE_LABELS:
+            self.enhance_combo.addItem(label, choice)
+        self.enhance_combo.setToolTip("Mejora con IA de la imagen seleccionada")
+        form2.addRow("Imagen:", self.enhance_combo)
         self.lossless_check = QCheckBox("Exportar sin pérdida")
         self.lossless_check.setObjectName("lossless_check")
         self.lossless_check.setChecked(True)
@@ -161,6 +182,9 @@ class Inspector(QWidget):
         self.lossless_check.toggled.connect(self._emit)
         self.favorites_combo.currentIndexChanged.connect(self._on_favorite)
         self.save_favorite_btn.clicked.connect(self._save_favorite)
+        self.enhance_combo.currentIndexChanged.connect(
+            lambda _i: self.enhance_choice_changed.emit(
+                EnhanceChoice(self.enhance_combo.currentData())))
 
     # --- API ------------------------------------------------------------------------
     def spec(self) -> PrintSpec:
@@ -217,6 +241,19 @@ class Inspector(QWidget):
     def apply_favorite(self, fav: FavoriteFormat) -> None:
         self.set_spec_values(to_mm(fav.width, fav.unit), to_mm(fav.height, fav.unit), fav.unit)
 
+    def set_calculated_length(self, mm: Decimal | None) -> None:
+        """Largo calculado por el modo automático para la imagen actual (solo lectura)."""
+        if mm is None or self.mode() != FitMode.FIT_LENGTH:
+            return
+        self.height_spin.blockSignals(True)
+        self.height_spin.setValue(self._display(Decimal(mm)))
+        self.height_spin.blockSignals(False)
+
+    def set_enhance_choice(self, choice: EnhanceChoice) -> None:
+        self.enhance_combo.blockSignals(True)
+        self.enhance_combo.setCurrentIndex(self.enhance_combo.findData(choice))
+        self.enhance_combo.blockSignals(False)
+
     def show_issues(self, issues: list[ValidationIssue]) -> None:
         parts = []
         for issue in issues:
@@ -263,6 +300,13 @@ class Inspector(QWidget):
         fill = self.mode_combo.currentData() == FitMode.FILL
         self.background_combo.setVisible(fill)
         self.background_label.setVisible(fill)
+        auto = self.mode_combo.currentData() == FitMode.FIT_LENGTH
+        self.height_spin.setReadOnly(auto)
+        self.height_spin.setButtonSymbols(QDoubleSpinBox.NoButtons if auto
+                                          else QDoubleSpinBox.UpDownArrows)
+        self.height_spin.setSuffix(" (calculado)" if auto else "")
+        if not auto:
+            self._refresh_spins()
 
     def _on_background_activated(self, index: int) -> None:
         if self.background_combo.itemData(index) == BackgroundKind.COLOR:

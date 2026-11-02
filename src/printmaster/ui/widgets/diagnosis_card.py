@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QGroupBox, QLabel, QVBoxLayout
 
+from printmaster.core.enhance.enhancer import EnhanceResult
 from printmaster.core.image_analyzer import Diagnosis
+from printmaster.core.pricing import format_cop
 from printmaster.domain.models import ImageInfo
 from printmaster.domain.quality import QualityLevel
 
@@ -31,7 +35,11 @@ class DiagnosisCard(QGroupBox):
         return self.label.text()
 
     def show_diagnosis(self, diag: Diagnosis | None, info: ImageInfo | None,
-                       downsample_ppi: int | None = None, error: str | None = None) -> None:
+                       downsample_ppi: int | None = None, error: str | None = None,
+                       price: int | None = None,
+                       page_mm: tuple[Decimal, Decimal] | None = None,
+                       enhanced: tuple[ImageInfo, EnhanceResult] | None = None,
+                       enhancing: bool = False) -> None:
         if info is None:
             self.label.setText(f'<span style="color:#ff6b6b">✕ {error or "Sin datos."}</span>')
             return
@@ -39,6 +47,21 @@ class DiagnosisCard(QGroupBox):
             f"<b>Original:</b> {info.width_px}×{info.height_px} px · {info.format} · "
             f"{info.file_size / 1_048_576:.1f} MB",
         ]
+        if page_mm is not None:
+            w, h = (f"{(v / 10).normalize():f}".replace(".", ",") for v in page_mm)
+            line = f"<b>Lámina:</b> {w} × {h} cm"
+            if price is not None:
+                line += (' · <b>Precio sugerido:</b> '
+                         f'<span style="color:#7ee787">{format_cop(price)}</span>')
+            rows.append(line)
+        if enhancing:
+            rows.append('<span style="color:#c39bd3">✦ Mejorando con IA…</span>')
+        elif enhanced is not None:
+            einfo, res = enhanced
+            label = "Mejorada con IA" if res.engine == "Real-ESRGAN" else "Mejorada"
+            rows.append(f'<span style="color:#c39bd3">✦ {label} ({res.engine}, {res.passes} '
+                        f"pasada{'s' if res.passes != 1 else ''}): "
+                        f"{einfo.width_px}×{einfo.height_px} px</span>")
         if diag is None:
             rows.append("<i>Analizando…</i>")
             self.label.setText("<br>".join(rows))
