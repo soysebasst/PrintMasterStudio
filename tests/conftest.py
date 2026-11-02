@@ -78,3 +78,10 @@ def make_image(tmp_path: Path):
         return path
 
     return factory
+
+
+@pytest.fixture
+def fake_engine_cmd() -> list[str]:
+    """Comando del ejecutable falso de Real-ESRGAN."""
+    import sys
+    return [sys.executable, str(Path(__file__).parent / "fakes" / "fake_realesrgan.py")]
