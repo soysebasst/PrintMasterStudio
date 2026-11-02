@@ -85,8 +85,9 @@ class QueueModel(QAbstractListModel):
     # --- escritura ------------------------------------------------------------------
     def refresh(self, row: int | None = None) -> None:
         if row is None:
-            self.beginResetModel()
-            self.endResetModel()
+            # dataChanged (no reset) para conservar la selección actual
+            if self.rowCount():
+                self.dataChanged.emit(self.index(0), self.index(self.rowCount() - 1))
         elif 0 <= row < self.rowCount():
             idx = self.index(row)
             self.dataChanged.emit(idx, idx)
@@ -127,7 +128,7 @@ class QueueModel(QAbstractListModel):
         self._pending.add(path)
         run_async(make_thumbnail, path, 192,
                   on_done=lambda img, p=path: self._thumb_ready(p, img),
-                  on_failed=lambda msg, p=path: self._thumb_failed(p))
+                  on_failed=lambda msg, p=path: self._thumb_failed(p), owner=self)
 
     def _thumb_ready(self, path: Path, img) -> None:
         self._pending.discard(path)
