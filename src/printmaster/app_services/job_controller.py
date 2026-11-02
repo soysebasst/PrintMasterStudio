@@ -47,6 +47,8 @@ from printmaster.printers.profiles import PrinterProfile, ValidationIssue, valid
 log = logging.getLogger("printmaster")
 
 _LOW_LEVELS = (QualityLevel.BAJA, QualityLevel.MUY_BAJA)
+# Errores que afectan a todo el lote (el ancho); los de largo dependen de cada imagen.
+GLOBAL_ERROR_CODES = {"invalid", "too_wide"}
 
 
 @dataclass
@@ -171,8 +173,12 @@ class JobController:
         # El PPI efectivo no depende del fondo: se planifica con fondo blanco para no
         # decodificar la imagen (el color de borde requiere leerla).
         p = make_plan(self.source_info(i), self.spec, self.mode, Background(), item.crop,
-                      self.settings.length_step_mm)
+                      self.settings.length_step_mm, self._aspect(i))
         item.diagnosis = rerate(base, p.effective_ppi)
+
+    def _aspect(self, i: int) -> tuple[int, int] | None:
+        info = self.items[i].info
+        return (info.width_px, info.height_px) if info is not None else None
 
     def source_info(self, i: int) -> ImageInfo:
         """Imagen que realmente se imprime: la mejorada si existe y no se desactivó."""
@@ -221,15 +227,22 @@ class JobController:
 
     def _page_spec(self, i: int, spec: PrintSpec, mode: FitMode, step: int) -> PrintSpec:
         """Formato de página ya resuelto para el ítem (largo automático incluido)."""
-        w, h = page_size_mm(self.source_info(i), spec, mode, step)
+        w, h = page_size_mm(self.source_info(i), spec, mode, step, self._aspect(i))
         return replace(spec, width_mm=w, height_mm=h)
 
     def page_size_for(self, i: int) -> tuple[Decimal, Decimal]:
         return page_size_mm(self.source_info(i), self.spec, self.mode,
-                            self.settings.length_step_mm)
+                            self.settings.length_step_mm, self._aspect(i))
+
+    def has_errors(self, i: int) -> bool:
+        return any(x.level == "error" for x in self.issues(i))
+
+    def exportable_indices(self) -> list[int]:
+        return [i for i, it in enumerate(self.items)
+                if it.status == ItemStatus.APPROVED and not self.has_errors(i)]
 
     def price_for(self, i: int) -> int | None:
-        if self.items[i].info is None:
+        if self.items[i].info is None or self.has_errors(i):
             return None
         w, h = self.page_size_for(i)
         return suggest_price(w, h, self.settings.pricing())
@@ -239,7 +252,7 @@ class JobController:
         count = total = 0
         for i in targets:
             item = self.items[i]
-            if item.info is None or item.status == ItemStatus.ERROR:
+            if item.info is None or item.status == ItemStatus.ERROR or self.has_errors(i):
                 continue
             count += 1
             total += self.price_for(i) or 0
@@ -265,7 +278,8 @@ class JobController:
         params = params or self.current_params()
         bg = self._resolved_background(item, params.background)
         return make_plan(self.source_info(i), params.spec, params.mode, bg,
-                         crop if crop is not None else item.crop, params.length_step_mm)
+                         crop if crop is not None else item.crop, params.length_step_mm,
+                         self._aspect(i))
 
     # --- diagnóstico y aprobación ---------------------------------------------------
     def analyze(self, i: int) -> Diagnosis:
@@ -331,18 +345,23 @@ class JobController:
             raise ValueError("Esta imagen no necesita mejora.")
         info = item.info
         item.enhancing = True
+        result: EnhanceResult | None = None
         try:
             model = choose_model(load_proxy(item.path, 512))
             result = enhancer.enhance(item.path, info.sha256, passes, model, cancel, progress)
             einfo = probe(result.path)
             plan_e = make_plan(einfo, self.spec, self.mode, Background(), item.crop,
-                               self.settings.length_step_mm)
+                               self.settings.length_step_mm, (info.width_px, info.height_px))
             # Métricas de contenido (nitidez, ruido, compresión) del original; PPI de la
             # mejorada. Medir "desenfoque" sobre píxeles interpolados no es informativo.
             base = item.original_diagnosis or self.analyze(i)
             item.enhanced_diagnosis = rerate(base, plan_e.effective_ppi)
             item.enhanced, item.enhanced_info = result, einfo
             item.error = None
+        except MemoryError as exc:
+            item.error = "Memoria insuficiente para mejorar esta imagen; se usará la original."
+            log.warning("Mejora sin memoria para %s", item.path.name)
+            raise EnhanceError(item.error) from exc
         except (EnhanceError, ImageLoadError, OSError) as exc:
             item.error = str(exc)
             log.warning("Mejora fallida para %s: %s", item.path.name, exc)
@@ -351,7 +370,10 @@ class JobController:
             raise EnhanceError(str(exc)) from exc
         finally:
             item.enhancing = False
-        self._revoke_approvals([i])
+        # La mejora pudo tardar minutos: la cola pudo cambiar. Se busca por identidad.
+        idx = next((k for k, it in enumerate(self.items) if it is item), None)
+        if idx is not None:
+            self._revoke_approvals([idx])
         return result
 
     def approve(self, i: int) -> None:
@@ -387,7 +409,8 @@ class JobController:
         today: date | None = None,
     ) -> list[ExportResult]:
         params = self.current_params()  # congelados: cambios posteriores no afectan el lote
-        errors = [x for x in self.issues(spec=params.spec) if x.level == "error"]
+        errors = [x for x in self.issues(spec=params.spec)
+                  if x.level == "error" and x.code in GLOBAL_ERROR_CODES]
         if errors:
             raise ValueError(errors[0].message)
         today = today or date.today()

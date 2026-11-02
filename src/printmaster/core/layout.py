@@ -36,16 +36,20 @@ def auto_length_mm(width_mm: Decimal, img_w: int, img_h: int, step_mm: int = 50)
 
 
 def _resolved_spec(info: ImageInfo, spec: PrintSpec, mode: FitMode,
-                   length_step_mm: int) -> PrintSpec:
+                   length_step_mm: int, aspect_px: tuple[int, int] | None = None) -> PrintSpec:
     if mode == FitMode.FIT_LENGTH:
-        length = auto_length_mm(spec.width_mm, info.width_px, info.height_px, length_step_mm)
+        aw, ah = aspect_px or (info.width_px, info.height_px)
+        length = auto_length_mm(spec.width_mm, aw, ah, length_step_mm)
         return PrintSpec(spec.width_mm, length, spec.ppi, Orientation.AS_ENTERED)
     return spec.resolved_for(info.width_px, info.height_px)
 
 
 def page_size_mm(info: ImageInfo, spec: PrintSpec, mode: FitMode,
-                 length_step_mm: int = 50) -> tuple[Decimal, Decimal]:
-    s = _resolved_spec(info, spec, mode, length_step_mm)
+                 length_step_mm: int = 50,
+                 aspect_px: tuple[int, int] | None = None) -> tuple[Decimal, Decimal]:
+    """aspect_px: proporción para el largo automático (la del original, aunque se imprima la
+    versión mejorada, cuyo redondeo de píxeles podría cambiar el largo)."""
+    s = _resolved_spec(info, spec, mode, length_step_mm, aspect_px)
     return s.width_mm, s.height_mm
 
 
@@ -56,11 +60,12 @@ def plan(
     background: Background = Background(),
     crop: CropOffset = CropOffset(),
     length_step_mm: int = 50,
+    aspect_px: tuple[int, int] | None = None,
 ) -> RenderPlan:
     if background.kind == BackgroundKind.EDGE_COLOR:
         raise ValueError("El color de borde debe resolverse antes de planificar.")
     W, H = info.width_px, info.height_px
-    s = _resolved_spec(info, spec, mode, length_step_mm)
+    s = _resolved_spec(info, spec, mode, length_step_mm, aspect_px)
     page_w_pt, page_h_pt = mm_to_pt(s.width_mm), mm_to_pt(s.height_mm)
 
     if mode == FitMode.COVER:

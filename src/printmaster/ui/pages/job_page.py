@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from printmaster.app_services.job_controller import JobController, JobItem
-from printmaster.core.enhance.enhancer import Enhancer, EnhanceResult
+from printmaster.core.enhance.enhancer import ENGINE_AI, Enhancer, EnhanceResult
 from printmaster.core.enhance.installer import find_engine
 from printmaster.core.enhance.realesrgan import EnhanceCancelled
 from printmaster.core.image_loader import load_proxy
@@ -62,6 +62,7 @@ class JobPage(QWidget):
         self._previews: OrderedDict[Path, QImage] = OrderedDict()
         self.enhancer = enhancer or Enhancer(find_engine(), self._cache_dir())
         self._enhance_queue: list[JobItem] = []
+        self._skip_enhance: list[JobItem] = []  # canceladas o fallidas: no reintentar solas
         self._enhancing: JobItem | None = None
         self._cancel_enhance = threading.Event()
         self._show_original = False
@@ -151,6 +152,7 @@ class JobPage(QWidget):
         self.queue.current_changed.connect(self._on_current_changed)
         self.queue.paths_added.connect(self._on_paths_added)
         self.model.rowsRemoved.connect(lambda *a: self._after_queue_change())
+        self.model.rowsRemoved.connect(lambda *a: self._drop_removed_enhancements())
         self.model.rowsMoved.connect(lambda *a: self._after_queue_change())
         self.inspector.changed.connect(self._on_params_changed)
         self.canvas.crop_changed.connect(self._on_crop_changed)
@@ -207,10 +209,11 @@ class JobPage(QWidget):
 
     def _update_state(self) -> None:
         items = self.controller.items
-        issues = self.controller.issues()
+        cur_idx = self._current_index()
+        issues = self.controller.issues(cur_idx if cur_idx >= 0 else None)
         self.inspector.show_issues(issues)
-        has_errors = any(i.level == "error" for i in issues)
         approved = any(it.status == ItemStatus.APPROVED for it in items)
+        exportable = bool(self.controller.exportable_indices()) if items else False
         if approved:
             step = 3
         elif any(it.diagnosis is not None for it in items):
@@ -224,7 +227,7 @@ class JobPage(QWidget):
         self.steps_label.setText("  ─  ".join(parts))
         busy = self._exporting
         enhancing = self._enhancing is not None or bool(self._enhance_queue)
-        self.export_btn.setEnabled(approved and not has_errors and not busy and not enhancing)
+        self.export_btn.setEnabled(exportable and not busy and not enhancing)
         self.cancel_enhance_btn.setVisible(enhancing)
         count, total = self.controller.total_price()
         self.total_label.setText(
@@ -384,8 +387,9 @@ class JobPage(QWidget):
         except Exception as exc:  # noqa: BLE001
             self.ppi_info.setText(str(exc))
             return
+        src = self.controller.source_info(row)  # el plan está en píxeles de la fuente impresa
         self.canvas.show_plan(qimg, plan, FitMode(self.controller.mode), self.profile,
-                              (item.info.width_px, item.info.height_px))
+                              (src.width_px, src.height_px))
         self.ppi_info.setText(f"PPI efectivo: {plan.effective_ppi:.0f}")
 
     # --- aprobación y exportación ---------------------------------------------------
@@ -404,11 +408,17 @@ class JobPage(QWidget):
         if skipped:
             messages.append(f"Se omitieron {len(skipped)} imágenes con baja resolución. "
                             "Revíselas y apruébelas una por una.")
-        enhanced = sum(1 for it in self.controller.items
-                       if it.uses_enhanced and it.status == ItemStatus.APPROVED)
-        if enhanced:
-            messages.append(f"Se mejoraron {enhanced} imágenes con IA: revíselas con "
+        approved = [it for it in self.controller.items
+                    if it.uses_enhanced and it.enhanced is not None
+                    and it.status == ItemStatus.APPROVED]
+        ai = sum(1 for it in approved if it.enhanced.engine == ENGINE_AI)
+        basic = len(approved) - ai
+        if ai:
+            messages.append(f"Se mejoraron {ai} imágenes con IA: revíselas con "
                             "«Ver original / Ver mejorada».")
+        if basic:
+            messages.append(f"Se mejoraron {basic} imágenes con la mejora básica (sin IA): "
+                            "revíselas con «Ver original / Ver mejorada».")
         if messages:
             self._info("Aprobación", "\n\n".join(messages))
 
@@ -454,9 +464,14 @@ class JobPage(QWidget):
         self._info("Exportación", f"No se pudo exportar: {message}")
 
     # --- mejora con IA (una imagen a la vez) ----------------------------------------
+    @staticmethod
+    def _contains(items: list[JobItem], item: JobItem) -> bool:
+        return any(x is item for x in items)
+
     def _maybe_enqueue(self, item: JobItem) -> None:
         row = self._row_of(item)
-        if row < 0 or item is self._enhancing or item in self._enhance_queue:
+        if (row < 0 or item is self._enhancing or self._contains(self._enhance_queue, item)
+                or self._contains(self._skip_enhance, item)):
             return
         if self.controller.needs_enhancement(row) > 0:
             self._enhance_queue.append(item)
@@ -508,16 +523,28 @@ class JobPage(QWidget):
         self._pump_enhance()
         self._update_state()
 
-    def _enhance_done(self, item: JobItem, _result) -> None:
+    def _enhance_done(self, item: JobItem, result) -> None:
+        if result is None:  # cancelada: no volver a intentarlo sola
+            self._skip_enhance.append(item)
         self._enhance_finished(item)
 
     def _enhance_failed(self, item: JobItem, _message: str) -> None:
+        self._skip_enhance.append(item)
         self._enhance_finished(item)
 
     def _cancel_enhancements(self) -> None:
+        self._skip_enhance.extend(self._enhance_queue)
+        if self._enhancing is not None:
+            self._skip_enhance.append(self._enhancing)
         self._enhance_queue.clear()
         self._cancel_enhance.set()
         self._update_state()
+
+    def _drop_removed_enhancements(self) -> None:
+        items = self.controller.items
+        self._enhance_queue = [it for it in self._enhance_queue if self._contains(items, it)]
+        if self._enhancing is not None and not self._contains(items, self._enhancing):
+            self._cancel_enhance.set()
 
     def _on_enhance_choice(self, choice) -> None:
         i = self._current_index()
@@ -525,6 +552,7 @@ class JobPage(QWidget):
             return
         item = self.controller.items[i]
         self.controller.set_enhance_choice(i, choice)
+        self._skip_enhance = [x for x in self._skip_enhance if x is not item]
         self._maybe_enqueue(item)
         self.model.refresh(i)
         self._show_diagnosis(i)

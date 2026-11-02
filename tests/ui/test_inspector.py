@@ -142,4 +142,4 @@ def test_card_price_and_enhanced(qtbot):
     assert "Mejorada con IA" in t and "3776×6720" in t
     assert "alta resolución" not in t.lower()
     card.show_diagnosis(diag, info, enhancing=True)
-    assert "Mejorando con IA" in card.text()
+    assert "Mejorando la imagen" in card.text()

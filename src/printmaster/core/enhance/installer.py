@@ -18,7 +18,8 @@ from printmaster.infra import paths
 
 ENGINE_URL = ("https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/"
               "realesrgan-ncnn-vulkan-20220424-windows.zip")
-ENGINE_SHA256 = "e5aa6eb131234b87c0c51f82b89390f5e3e642b7b70f2b9bbe95b6a285a40c96"
+# SHA-256 del zip oficial (45.474.481 bytes), verificado al descargarlo el 2 nov 2026.
+ENGINE_SHA256 = "abc02804e17982a3be33675e4d471e91ea374e65b70167abc09e31acb412802d"
 CHUNK = 1 << 16
 
 

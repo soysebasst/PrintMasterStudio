@@ -45,7 +45,8 @@ class BadgeDelegate(QStyledItemDelegate):
             painter.setPen(Qt.NoPen)
             painter.drawRoundedRect(ia, 4, 4)
             painter.setPen(QColor("white"))
-            painter.drawText(ia, Qt.AlignCenter, "…IA" if enhanced == "enhancing" else "IA")
+            text = {"enhancing": "…", "enhanced": "IA", "basic": "Mej."}[enhanced]
+            painter.drawText(ia, Qt.AlignCenter, text)
             painter.restore()
         status = index.data(StatusRole)
         level = index.data(LevelRole)

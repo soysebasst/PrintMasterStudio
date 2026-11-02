@@ -8,6 +8,7 @@ from PySide6.QtCore import QAbstractListModel, QModelIndex, Qt
 from PySide6.QtGui import QColor, QIcon, QPixmap
 
 from printmaster.app_services.job_controller import JobController
+from printmaster.core.enhance.enhancer import ENGINE_AI
 from printmaster.core.image_loader import make_thumbnail
 from printmaster.core.pricing import format_cop
 from printmaster.ui.qt_images import pil_to_qimage
@@ -15,7 +16,7 @@ from printmaster.ui.workers import run_async
 
 StatusRole = Qt.UserRole + 1
 LevelRole = Qt.UserRole + 2
-EnhancedRole = Qt.UserRole + 3  # "enhancing" | "enhanced" | None
+EnhancedRole = Qt.UserRole + 3  # "enhancing" | "enhanced" (IA) | "basic" | None
 
 
 def _placeholder(color: str) -> QIcon:
@@ -69,8 +70,9 @@ class QueueModel(QAbstractListModel):
                 w, h = (f"{(v / 10).normalize():f}" for v in
                         self.controller.page_size_for(index.row()))
                 tip += f"\nLámina {w} × {h} cm · {format_cop(price)}"
-            if item.uses_enhanced:
-                tip += "\nMejorada con IA"
+            if item.uses_enhanced and item.enhanced is not None:
+                tip += ("\nMejorada con IA (Real-ESRGAN)" if item.enhanced.engine == ENGINE_AI
+                        else "\nMejorada (mejora básica, sin IA)")
             if item.duplicate_of is not None:
                 tip += f"\nDuplicado de #{item.duplicate_of + 1}"
             if item.error:
@@ -83,7 +85,9 @@ class QueueModel(QAbstractListModel):
         if role == EnhancedRole:
             if item.enhancing:
                 return "enhancing"
-            return "enhanced" if item.uses_enhanced else None
+            if not item.uses_enhanced or item.enhanced is None:
+                return None
+            return "enhanced" if item.enhanced.engine == ENGINE_AI else "basic"
         return None
 
     def flags(self, index: QModelIndex):
