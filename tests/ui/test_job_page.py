@@ -76,6 +76,8 @@ def test_approve_selected(page, qtbot, make_image, tmp_path):
     qtbot.wait(300)
     drop(page, [make_image("a.jpg", size=(1200, 1800), folder=tmp_path / "in")])
     qtbot.waitUntil(lambda: all_ready(page, 1), timeout=10000)
+    # el estado cambia en el hilo de fondo antes de que la UI habilite el botón
+    qtbot.waitUntil(page.approve_btn.isEnabled, timeout=5000)
     qtbot.mouseClick(page.approve_btn, Qt.LeftButton)
     assert page.controller.items[0].status == ItemStatus.APPROVED
     assert "④" in page.steps_label.text()
