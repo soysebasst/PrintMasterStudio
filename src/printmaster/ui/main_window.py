@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QHBoxLayout, QListWidget, QMainWindow, QStackedWidget, QWidget
+from PySide6.QtWidgets import (
+    QHBoxLayout,
+    QListWidget,
+    QMainWindow,
+    QScrollArea,
+    QStackedWidget,
+    QWidget,
+)
 
 from printmaster.infra.settings import FavoriteFormat, Settings, save_settings
 from printmaster.printers.profiles import load_profile
@@ -29,6 +36,7 @@ class MainWindow(QMainWindow):
         self.nav = QListWidget()
         self.nav.setObjectName("nav")
         self.nav.addItems(SECTIONS)
+
         self.pages = QStackedWidget()
         self.pages.setObjectName("pages")
         lay.addWidget(self.nav)
@@ -38,7 +46,10 @@ class MainWindow(QMainWindow):
         self.home_page = HomePage(settings)
         self.job_page = self._make_job_page()
         self.settings_page = SettingsPage(settings)
-        for page in (self.home_page, self.job_page, self.settings_page):
+        settings_scroll = QScrollArea()
+        settings_scroll.setWidgetResizable(True)
+        settings_scroll.setWidget(self.settings_page)
+        for page in (self.home_page, self.job_page, settings_scroll):
             self.pages.addWidget(page)
 
         self.nav.currentRowChanged.connect(self.pages.setCurrentIndex)

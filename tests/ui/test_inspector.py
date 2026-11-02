@@ -116,7 +116,7 @@ def test_height_readonly_in_fit_length(insp):
 def test_calculated_length(insp):
     insp.set_calculated_length(D(1100))
     assert insp.height_spin.value() == 110
-    assert "calculado" in insp.height_spin.suffix()
+    assert "auto" in insp.height_spin.suffix()
 
 
 def test_enhance_choice_signal(insp, qtbot):

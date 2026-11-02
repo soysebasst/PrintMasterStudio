@@ -38,3 +38,11 @@ def test_install_engine_button(page, qtbot, monkeypatch, tmp_path):
 
 def test_engine_status_not_installed(page):
     assert "No instalado" in page.engine_status_label.text()
+
+
+def test_gemini_prompt_saved(page, qtbot):
+    page.gemini_prompt_edit.setPlainText("Mejora esta imagen.")
+    qtbot.mouseClick(page.save_btn, Qt.LeftButton)
+    assert load_settings().gemini_prompt == "Mejora esta imagen."
+    qtbot.mouseClick(page.reset_prompt_btn, Qt.LeftButton)
+    assert "letra por letra" in page.gemini_prompt_edit.toPlainText()

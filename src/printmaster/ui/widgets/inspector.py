@@ -102,6 +102,7 @@ class Inspector(QWidget):
         self.height_spin.setObjectName("height_spin")
         self.height_spin.setToolTip("Largo")
         for spin in (self.width_spin, self.height_spin):
+            spin.setMinimumWidth(56)
             spin.setRange(0.1, 10000)
             spin.setDecimals(2)
             spin.setKeyboardTracking(False)
@@ -109,6 +110,7 @@ class Inspector(QWidget):
         self.unit_combo.setObjectName("unit_combo")
         for unit, label in ((Unit.CM, "cm"), (Unit.MM, "mm"), (Unit.IN, "pulgadas")):
             self.unit_combo.addItem(label, unit)
+        self.unit_combo.setMaximumWidth(92)
         times = QLabel("×")
         size_row.addWidget(self.width_spin, 3)
         size_row.addWidget(times)
@@ -134,6 +136,8 @@ class Inspector(QWidget):
         self.mode_combo.setVisible(False)
         grid = QGridLayout()
         grid.setSpacing(6)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
         short = {FitMode.FIT_LENGTH: "Largo auto", FitMode.CONTAIN: "Ajustar",
                  FitMode.FILL: "Rellenar", FitMode.COVER: "Recortar"}
         self.mode_buttons: dict[FitMode, QPushButton] = {}
@@ -142,6 +146,7 @@ class Inspector(QWidget):
         for k, (mode, label) in enumerate(MODE_LABELS):
             btn = QPushButton(short[mode])
             btn.setObjectName("segment")
+            btn.setMinimumWidth(60)
             btn.setCheckable(True)
             btn.setToolTip(label)
             btn.clicked.connect(lambda _c=False, m=mode: self._select_mode(m))
@@ -339,6 +344,7 @@ class Inspector(QWidget):
             icon = "✕" if issue.level == "error" else "▲"
             parts.append(f'<span style="color:{color}">{icon} {issue.message}</span>')
         self.issues_label.setText("<br>".join(parts))
+        self.issues_label.setVisible(bool(parts))
 
     # --- internos -------------------------------------------------------------------
     def _emit(self, *args) -> None:
@@ -381,7 +387,7 @@ class Inspector(QWidget):
         self.background_label.setVisible(fill)
         auto = self.mode_combo.currentData() == FitMode.FIT_LENGTH
         self.height_spin.setReadOnly(auto)
-        self.height_spin.setSuffix(" (calculado)" if auto else "")
+        self.height_spin.setSuffix(" auto" if auto else "")
         if not auto:
             self._refresh_spins()
 

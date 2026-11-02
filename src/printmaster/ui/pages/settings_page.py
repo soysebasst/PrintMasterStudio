@@ -16,12 +16,15 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QPlainTextEdit,
     QPushButton,
     QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
+from printmaster.core.enhance.gemini_api import API_NOTE
+from printmaster.core.enhance.gemini_web import DEFAULT_PROMPT
 from printmaster.core.enhance.installer import find_engine, install_engine
 from printmaster.core.enhance.realesrgan import RealEsrgan
 from printmaster.domain.units import Unit
@@ -118,6 +121,25 @@ class SettingsPage(QWidget):
         self.test_engine_btn.clicked.connect(self._test_engine)
         lay.addWidget(ai_box)
         self._refresh_engine_status()
+
+        gem_box = QGroupBox("Gemini (web, gratis)")
+        gem = QVBoxLayout(gem_box)
+        gem.addWidget(QLabel("Prompt que se copia al pulsar «Mejorar en Gemini»:"))
+        self.gemini_prompt_edit = QPlainTextEdit(self.settings.gemini_prompt)
+        self.gemini_prompt_edit.setFixedHeight(80)
+        gem.addWidget(self.gemini_prompt_edit)
+        reset_row = QHBoxLayout()
+        self.reset_prompt_btn = QPushButton("Restaurar prompt original")
+        self.reset_prompt_btn.clicked.connect(
+            lambda: self.gemini_prompt_edit.setPlainText(DEFAULT_PROMPT))
+        reset_row.addWidget(self.reset_prompt_btn)
+        reset_row.addStretch(1)
+        gem.addLayout(reset_row)
+        api = QLabel(API_NOTE)
+        api.setObjectName("hint")
+        api.setWordWrap(True)
+        gem.addWidget(api)
+        lay.addWidget(gem_box)
 
         fav_box = QGroupBox("Formatos favoritos")
         fav_lay = QVBoxLayout(fav_box)
@@ -232,6 +254,7 @@ class SettingsPage(QWidget):
         s.min_price = self.min_price_spin.value()
         s.enhance_enabled = self.enhance_check.isChecked()
         s.enhance_target_ppi = self.target_ppi_spin.value()
+        s.gemini_prompt = self.gemini_prompt_edit.toPlainText().strip() or DEFAULT_PROMPT
         save_settings(s)
         self.status_label.setText("Configuración guardada.")
         self.settings_changed.emit(s.model_copy(deep=True))

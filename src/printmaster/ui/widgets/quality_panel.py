@@ -39,7 +39,7 @@ class DropZone(QLabel):
         self.setAlignment(Qt.AlignCenter)
         self.setAcceptDrops(True)
         self.setCursor(Qt.PointingHandCursor)
-        self.setMinimumHeight(54)
+        self.setMinimumHeight(44)
 
     def dragEnterEvent(self, event) -> None:  # noqa: N802
         if event.mimeData().hasUrls():
@@ -63,7 +63,7 @@ class QualityPanel(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(12, 4, 12, 4)
+        lay.setContentsMargins(0, 6, 0, 0)
         lay.setSpacing(6)
         title = QLabel("Calidad")
         title.setObjectName("sectionTitle")
@@ -122,7 +122,9 @@ class QualityPanel(QWidget):
             bg, fg = CHIP_STYLE[diag.level]
             self.level_chip.setText(f"{SHORT[diag.level]} · {diag.effective_ppi:.0f} PPI")
             self.level_chip.setStyleSheet(f"background:{bg}; color:{fg};")
-            self.recommendation_label.setText(diag.recommendation)
+            self.recommendation_label.setText(
+                "Mejorada: compare «Original» y «Mejorada» antes de aprobar."
+                if enhanced is not None and not enhancing else diag.recommendation)
         else:
             self.level_chip.setText("Analizando…" if info is not None else "—")
             self.level_chip.setStyleSheet("")

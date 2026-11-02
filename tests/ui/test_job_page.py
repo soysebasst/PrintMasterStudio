@@ -81,7 +81,8 @@ def test_approve_selected(page, qtbot, make_image, tmp_path):
     qtbot.waitUntil(page.approve_btn.isEnabled, timeout=5000)
     qtbot.mouseClick(page.approve_btn, Qt.LeftButton)
     assert page.controller.items[0].status == ItemStatus.APPROVED
-    assert "④" in page.steps_label.text()
+    assert page.step_chips[2].property("state") == "current"
+    assert page.step_chips[0].property("state") == "done"
 
 
 def test_param_change_keeps_selection_and_preview(page, qtbot, make_image, tmp_path):

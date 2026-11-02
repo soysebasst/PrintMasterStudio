@@ -10,6 +10,7 @@ from pathlib import Path
 from PySide6.QtCore import QObject, Qt, QThreadPool, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QGuiApplication, QImage
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QHBoxLayout,
     QLabel,
     QMessageBox,
@@ -22,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from printmaster.app_services.job_controller import JobController, JobItem
+from printmaster.app_services.next_step import next_step
 from printmaster.core.enhance.enhancer import ENGINE_AI, Enhancer, EnhanceResult
 from printmaster.core.enhance.gemini_web import GEMINI_URL, reveal_command
 from printmaster.core.enhance.installer import find_engine
@@ -44,7 +46,7 @@ from printmaster.ui.workers import run_async
 PREVIEW_SIDE = 1600
 MAX_BACKGROUND_THREADS = 2  # especificación R5: como máximo 2 imágenes decodificándose a la vez
 PREVIEW_CACHE = 8
-STEPS = ["① Cargar", "② Formato", "③ Revisar", "④ Exportar"]
+STEPS = ["1  Cargar", "2  Revisar", "3  Exportar"]
 
 
 class _ProgressBridge(QObject):
@@ -75,15 +77,28 @@ class JobPage(QWidget):
         self._bridge.progress.connect(self._on_progress)
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(8, 8, 8, 8)
-        self.steps_label = QLabel()
-        self.steps_label.setObjectName("steps")
-        self.steps_label.setTextFormat(Qt.RichText)
-        root.addWidget(self.steps_label)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+        header = QWidget()
+        header.setObjectName("pageHeader")
+        head = QHBoxLayout(header)
+        head.setContentsMargins(16, 10, 16, 10)
+        title = QLabel("Nuevo trabajo")
+        title.setObjectName("pageTitle")
+        head.addWidget(title)
+        head.addSpacing(16)
+        self.step_chips: list[QLabel] = []
+        for text in STEPS:
+            chip = QLabel(text)
+            chip.setObjectName("stepChip")
+            self.step_chips.append(chip)
+            head.addWidget(chip)
+        head.addStretch(1)
+        root.addWidget(header)
 
         splitter = QSplitter(Qt.Horizontal)
         self.queue = QueueView(self.model)
-        self.queue.setMinimumWidth(240)
+        self.queue.setMinimumWidth(190)
         splitter.addWidget(self.queue)
 
         center = QWidget()
@@ -91,19 +106,35 @@ class JobPage(QWidget):
         center_lay.setContentsMargins(0, 0, 0, 0)
         self.canvas = PreviewCanvas()
         center_lay.addWidget(self.canvas, 1)
-        zoom_row = QHBoxLayout()
+        top_row = QHBoxLayout()
+        top_row.setContentsMargins(8, 8, 8, 4)
+        self.original_btn = QPushButton("Original")
+        self.enhanced_btn = QPushButton("Mejorada")
+        self._compare_group = QButtonGroup(self)
+        for b in (self.original_btn, self.enhanced_btn):
+            b.setObjectName("segment")
+            b.setCheckable(True)
+            b.setEnabled(False)
+            self._compare_group.addButton(b)
+            top_row.addWidget(b)
+        self.enhanced_btn.setChecked(True)
+        self.original_btn.setToolTip("Ver la imagen original")
+        self.enhanced_btn.setToolTip("Ver la versión mejorada")
+        top_row.addStretch(1)
         self.zoom_out_btn = QPushButton("−")
-        self.fit_btn = QPushButton("Ajustar a la vista")
+        self.fit_btn = QPushButton("⤢")
         self.zoom_in_btn = QPushButton("+")
-        self.before_after_btn = QPushButton("Ver original")
-        self.before_after_btn.setToolTip("Comparar la imagen original con la mejorada con IA")
-        self.before_after_btn.setEnabled(False)
-        for b in (self.zoom_out_btn, self.fit_btn, self.zoom_in_btn, self.before_after_btn):
-            zoom_row.addWidget(b)
-        zoom_row.addStretch(1)
-        self.ppi_info = QLabel("")
-        zoom_row.addWidget(self.ppi_info)
-        center_lay.addLayout(zoom_row)
+        for b, tip in ((self.zoom_out_btn, "Alejar"), (self.fit_btn, "Ajustar a la vista"),
+                       (self.zoom_in_btn, "Acercar")):
+            b.setObjectName("iconButton")
+            b.setToolTip(tip)
+            top_row.addWidget(b)
+        center_lay.insertLayout(0, top_row)
+        self.info_label = QLabel("")
+        self.info_label.setObjectName("muted")
+        self.info_label.setAlignment(Qt.AlignCenter)
+        center_lay.addWidget(self.info_label)
+        self.ppi_info = self.info_label
         splitter.addWidget(center)
 
         side = QWidget()
@@ -114,44 +145,58 @@ class JobPage(QWidget):
         self.diagnosis = self.quality  # compatibilidad: show_diagnosis() / text()
         self.inspector.layout().insertWidget(self.inspector.quality_insert_index(), self.quality)
         self.quality.choice_row.addWidget(self.inspector.enhance_combo, 1)
+        self.quality.choice_row.setSpacing(6)
         side_lay.addWidget(self.inspector)
         self.side_panel = side
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setWidget(side)
-        scroll.setMinimumWidth(300)
+        scroll.setMinimumWidth(310)
+        scroll.setMaximumWidth(380)
         splitter.addWidget(scroll)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setStretchFactor(2, 0)
-        splitter.setSizes([260, 700, 330])
+        splitter.setSizes([200, 760, 330])
         root.addWidget(splitter, 1)
 
-        bottom = QHBoxLayout()
+        footer = QWidget()
+        footer.setObjectName("pageFooter")
+        bottom = QHBoxLayout(footer)
+        bottom.setContentsMargins(16, 10, 16, 10)
+        self.next_label = QLabel("")
+        self.next_label.setObjectName("nextLabel")
+        self.next_label.setWordWrap(True)
+        bottom.addWidget(self.next_label, 1)
         self.progress = QProgressBar()
         self.progress.setRange(0, 100)
         self.progress.setValue(0)
-        bottom.addWidget(self.progress, 1)
+        self.progress.setMaximumWidth(220)
+        self.progress.setVisible(False)
+        bottom.addWidget(self.progress)
         self.total_label = QLabel("")
         self.total_label.setObjectName("total_label")
-        self.total_label.setStyleSheet("color:#7ee787; font-weight:bold; padding: 0 8px;")
         bottom.addWidget(self.total_label)
         self.cancel_enhance_btn = QPushButton("Cancelar mejora")
         self.cancel_enhance_btn.setVisible(False)
         bottom.addWidget(self.cancel_enhance_btn)
-        self.approve_btn = QPushButton("Aprobar seleccionada")
+        self.approve_btn = QPushButton("Aprobar esta")
+        self.approve_btn.setToolTip("Aprobar la imagen seleccionada")
+        self.quality.choice_row.addWidget(self.approve_btn, 1)
         self.approve_all_btn = QPushButton("Aprobar todo")
         self.export_btn = QPushButton("Exportar PDF")
         self.export_btn.setProperty("primary", True)
-        for b in (self.approve_btn, self.approve_all_btn, self.export_btn):
+        for b in (self.approve_all_btn, self.export_btn):
             bottom.addWidget(b)
-        root.addLayout(bottom)
+        root.addWidget(footer)
 
         # conexiones
         self.zoom_out_btn.clicked.connect(self.canvas.zoom_out)
         self.zoom_in_btn.clicked.connect(self.canvas.zoom_in)
         self.fit_btn.clicked.connect(self.canvas.fit)
-        self.before_after_btn.clicked.connect(self._toggle_before_after)
+        self.original_btn.clicked.connect(lambda: self._set_compare(True))
+        self.enhanced_btn.clicked.connect(lambda: self._set_compare(False))
         self.cancel_enhance_btn.clicked.connect(self._cancel_enhancements)
         self.inspector.enhance_choice_changed.connect(self._on_enhance_choice)
         self.quality.gemini_btn.clicked.connect(self._on_gemini)
@@ -229,12 +274,29 @@ class JobPage(QWidget):
             step = 1
         else:
             step = 0
-        parts = [f'<b style="color:#3d8bfd">{s}</b>' if i == step else s
-                 for i, s in enumerate(STEPS)]
-        self.steps_label.setText("  ─  ".join(parts))
+        # pasos: 0 cargar, 1 revisar, 2 exportar
+        current = 0 if not items else (2 if step == 3 else 1)
+        if items and all(it.status == ItemStatus.EXPORTED for it in items
+                         if it.status != ItemStatus.ERROR):
+            current = 3
+        for k, chip in enumerate(self.step_chips):
+            state = "done" if k < current else ("current" if k == current else "todo")
+            chip.setText(("✓ " + STEPS[k].split("  ", 1)[1]) if state == "done" else STEPS[k])
+            if chip.property("state") != state:
+                chip.setProperty("state", state)
+                chip.style().unpolish(chip)
+                chip.style().polish(chip)
         busy = self._exporting
-        enhancing = self._enhancing is not None or bool(self._enhance_queue)
+        enhancing = self._enhancing is not None or bool(self._enhance_queue) or any(
+            it.enhancing for it in items)
+        analyzing = any(it.info is not None and it.diagnosis is None
+                        and it.status == ItemStatus.PENDING for it in items)
+        hint = self._gemini_hint or next_step(self.controller, analyzing, enhancing)
+        self.next_label.setText(f"Siguiente: {hint}" if not self._gemini_hint else hint)
+        n_export = len(self.controller.exportable_indices()) if items else 0
+        self.export_btn.setText(f"Exportar {n_export} PDF" if n_export else "Exportar PDF")
         self.export_btn.setEnabled(exportable and not busy and not enhancing)
+        self.progress.setVisible(busy)
         self.cancel_enhance_btn.setVisible(enhancing)
         count, total = self.controller.total_price()
         self.total_label.setText(
@@ -244,10 +306,24 @@ class JobPage(QWidget):
         self.approve_btn.setEnabled(
             cur >= 0 and items[cur].status in (ItemStatus.READY, ItemStatus.EXPORTED)
             and not busy)
-        self.before_after_btn.setEnabled(cur >= 0 and items[cur].uses_enhanced)
-        if not self.before_after_btn.isEnabled():
+        has_enh = cur >= 0 and items[cur].uses_enhanced
+        for b in (self.original_btn, self.enhanced_btn):
+            b.setEnabled(has_enh)
+        if not has_enh:
             self._show_original = False
-        self.before_after_btn.setText("Ver mejorada" if self._show_original else "Ver original")
+        (self.original_btn if self._show_original else self.enhanced_btn).setChecked(True)
+        if cur >= 0 and items[cur].info is not None and not self.controller.has_errors(cur):
+            w, h = (f"{(v / 10).normalize():f}".replace(".", ",")
+                    for v in self.controller.page_size_for(cur))
+            ppi = items[cur].diagnosis.effective_ppi if items[cur].diagnosis else None
+            if self._show_original and items[cur].original_diagnosis is not None:
+                ppi = items[cur].original_diagnosis.effective_ppi
+            self.info_label.setText(f"{w} × {h} cm" + (f" · {ppi:.0f} PPI efectivos"
+                                                        if ppi else ""))
+            self.inspector.set_price(self.controller.price_for(cur))
+        else:
+            self.info_label.setText("")
+            self.inspector.set_price(None)
 
     def _after_queue_change(self) -> None:
         self._update_state()
@@ -397,7 +473,7 @@ class JobPage(QWidget):
         src = self.controller.source_info(row)  # el plan está en píxeles de la fuente impresa
         self.canvas.show_plan(qimg, plan, FitMode(self.controller.mode), self.profile,
                               (src.width_px, src.height_px))
-        self.ppi_info.setText(f"PPI efectivo: {plan.effective_ppi:.0f}")
+        self._update_state()
 
     # --- aprobación y exportación ---------------------------------------------------
     def _approve_current(self) -> None:
@@ -566,8 +642,8 @@ class JobPage(QWidget):
         self._redraw_current()
         self._update_state()
 
-    def _toggle_before_after(self) -> None:
-        self._show_original = not self._show_original
+    def _set_compare(self, original: bool) -> None:
+        self._show_original = original
         self._redraw_current()
         self._update_state()
 
@@ -601,6 +677,7 @@ class JobPage(QWidget):
         item.enhancing = True
         self.model.refresh(i)
         self._show_diagnosis(i)
+        self._update_state()
         run_async(self._attach, item, Path(path),
                   on_done=lambda res, it=item: self._attach_done(it, res),
                   on_failed=lambda msg, it=item: self._attach_failed(it, msg), owner=self)

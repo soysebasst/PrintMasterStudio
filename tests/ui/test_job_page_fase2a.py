@@ -35,10 +35,9 @@ def test_enhance_flow_ui(page, qtbot, make_image, tmp_path):
     qtbot.waitUntil(lambda: page.controller.items[0].enhanced is not None, timeout=20000)
     qtbot.waitUntil(lambda: "Mejorada con IA" in page.diagnosis.text(), timeout=5000)
     assert "$17.000" in page.total_label.text() and "1 lámina" in page.total_label.text()
-    assert page.before_after_btn.isEnabled()
-    before = page.before_after_btn.text()
-    qtbot.mouseClick(page.before_after_btn, Qt.LeftButton)
-    assert page.before_after_btn.text() != before
+    assert page.enhanced_btn.isEnabled() and page.enhanced_btn.isChecked()
+    qtbot.mouseClick(page.original_btn, Qt.LeftButton)
+    assert page.original_btn.isChecked() and page._show_original
     assert not page.cancel_enhance_btn.isVisible()
 
 
