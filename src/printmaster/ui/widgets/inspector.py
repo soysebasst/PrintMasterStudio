@@ -31,6 +31,7 @@ CUSTOM_PPI = -1
 DEBOUNCE_MS = 150
 
 MODE_LABELS = [
+    (FitMode.FIT_LENGTH, "Ajustar largo a la imagen"),
     (FitMode.CONTAIN, "Ajustar sin recortar"),
     (FitMode.FILL, "Rellenar"),
     (FitMode.COVER, "Recortar"),
@@ -84,7 +85,8 @@ class Inspector(QWidget):
         form.addRow("Unidad:", self.unit_combo)
         self.orientation_combo = QComboBox()
         self.orientation_combo.setObjectName("orientation_combo")
-        for o, label in ((Orientation.AUTO, "Automática"), (Orientation.PORTRAIT, "Vertical"),
+        for o, label in ((Orientation.AS_ENTERED, "Como se escribió"),
+                         (Orientation.AUTO, "Automática"), (Orientation.PORTRAIT, "Vertical"),
                          (Orientation.LANDSCAPE, "Horizontal")):
             self.orientation_combo.addItem(label, o)
         form.addRow("Orientación:", self.orientation_combo)
@@ -140,6 +142,8 @@ class Inspector(QWidget):
         self.ppi_combo.setCurrentIndex(preset if preset >= 0 else
                                        self.ppi_combo.findData(CUSTOM_PPI))
         self.mode_combo.setCurrentIndex(self.mode_combo.findData(settings.default_mode))
+        self.orientation_combo.setCurrentIndex(
+            self.orientation_combo.findData(settings.default_orientation))
         self.set_favorites(settings.favorites)
         self._refresh_spins()
         self._update_visibility()

@@ -22,7 +22,7 @@ def test_paths_under_home(home):
 def test_defaults():
     s = load_settings()
     assert len(s.favorites) == 6
-    assert s.favorites[0].name == "60 × 45 cm"
+    assert s.favorites[0].name == "60 × 30 cm"
     assert s.favorites[0].width == Decimal(60)
     assert s.default_ppi == 200
 
@@ -45,3 +45,45 @@ def test_corrupt_file_backed_up(home):
 def test_invalid_ppi():
     with pytest.raises(ValidationError):
         Settings(output_dir=".", default_ppi=1000)
+
+
+def test_v1_settings_migrated(home):
+    import json
+
+    from printmaster.domain.models import FitMode, Orientation
+    f = paths.config_dir() / "settings.json"
+    f.write_text(json.dumps({
+        "output_dir": str(home / "salida"), "default_ppi": 200, "default_unit": "cm",
+        "default_mode": "ajustar", "naming_prefix": "Pedido",
+        "favorites": [{"name": "Mío", "width": 50, "height": 70, "unit": "cm"}],
+    }))
+    s = load_settings()
+    assert s.default_mode == FitMode.FIT_LENGTH
+    assert s.default_orientation == Orientation.AS_ENTERED
+    assert s.roll_width_mm == 600
+    assert s.naming_prefix == "Pedido"
+    assert [x.name for x in s.favorites] == ["Mío"]
+    assert s.settings_version == 2
+
+
+def test_v2_settings_not_remigrated():
+    from printmaster.domain.models import FitMode
+    s = load_settings()
+    s.default_mode = FitMode.CONTAIN
+    save_settings(s)
+    assert load_settings().default_mode == FitMode.CONTAIN
+
+
+def test_new_default_favorites():
+    assert [f.name for f in load_settings().favorites] == [
+        "60 × 30 cm", "60 × 45 cm", "60 × 60 cm", "60 × 90 cm", "60 × 120 cm", "60 × 150 cm"]
+
+
+def test_pricing_config():
+    assert Settings(price_long=20000).pricing().price_long == 20000
+    assert Settings().pricing().price_short == 10000
+
+
+def test_roll_width_range():
+    with pytest.raises(ValidationError):
+        Settings(roll_width_mm=700)

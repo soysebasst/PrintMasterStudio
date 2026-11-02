@@ -84,9 +84,9 @@ def test_changed_debounced(insp, qtbot):
 
 
 def test_favorite_applies(insp):
-    idx = insp.favorites_combo.findText("50 × 70 cm")
+    idx = insp.favorites_combo.findText("60 × 45 cm")
     insp.favorites_combo.setCurrentIndex(idx)
-    assert insp.spec().width_mm == D("500") and insp.spec().height_mm == D("700")
+    assert insp.spec().width_mm == D("600") and insp.spec().height_mm == D("450")
 
 
 def test_diagnosis_card(qtbot):
