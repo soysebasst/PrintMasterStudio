@@ -6,6 +6,7 @@ No depende de Qt: la interfaz lo usa y lo ejecuta en hilos de fondo.
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, replace
@@ -13,7 +14,7 @@ from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
-from printmaster.core.color import edge_color
+from printmaster.core.color import edge_color, flatten_alpha
 from printmaster.core.enhance.enhancer import (
     EnhanceError,
     Enhancer,
@@ -21,9 +22,16 @@ from printmaster.core.enhance.enhancer import (
     choose_model,
     passes_needed,
 )
+from printmaster.core.enhance.gemini_web import ENGINE_GEMINI, aspect_mismatch
 from printmaster.core.image_analyzer import Diagnosis, rerate
 from printmaster.core.image_analyzer import analyze as analyze_image
-from printmaster.core.image_loader import ImageLoadError, collect_images, load_proxy, probe
+from printmaster.core.image_loader import (
+    ImageLoadError,
+    collect_images,
+    load_proxy,
+    load_rgb,
+    probe,
+)
 from printmaster.core.layout import page_size_mm
 from printmaster.core.layout import plan as make_plan
 from printmaster.core.naming import NamingOptions, output_path, unique_path
@@ -41,6 +49,7 @@ from printmaster.domain.models import (
     RenderPlan,
 )
 from printmaster.domain.quality import QualityLevel, classify
+from printmaster.infra import paths
 from printmaster.infra.settings import Settings
 from printmaster.printers.profiles import PrinterProfile, ValidationIssue, validate
 
@@ -83,6 +92,12 @@ class JobParams:
     naming: NamingOptions
     export_options: ExportOptions
     length_step_mm: int = 50
+
+
+@dataclass(frozen=True)
+class AttachResult:
+    result: EnhanceResult
+    aspect_warning: bool
 
 
 @dataclass
@@ -375,6 +390,60 @@ class JobController:
         if idx is not None:
             self._revoke_approvals([idx])
         return result
+
+    def attach_external(self, i: int, path: Path,
+                        enhancer: Enhancer | None = None) -> AttachResult:
+        """Usa como versión mejorada una imagen externa (p. ej. descargada de Gemini web).
+
+        El archivo soltado no se modifica: se copia como PNG a la caché. El largo y el precio
+        siguen saliendo de la proporción del original.
+        """
+        item = self.items[i]
+        if item.info is None:
+            raise ValueError(item.error or "La imagen no se pudo leer.")
+        orig = item.info
+        dropped = probe(Path(path))  # ImageLoadError si no es una imagen válida
+        img, _ = load_rgb(dropped.path)
+        cache = paths.data_dir() / "cache" / "external"
+        cache.mkdir(parents=True, exist_ok=True)
+        copy = cache / f"{orig.sha256}_{dropped.sha256}.png"
+        if not copy.exists():
+            tmp = copy.with_name(copy.name + ".tmp")
+            flatten_alpha(img).convert("RGB").save(tmp, "PNG")
+            os.replace(tmp, copy)
+        ext_info = probe(copy)
+        warning = aspect_mismatch((orig.width_px, orig.height_px),
+                                  (ext_info.width_px, ext_info.height_px))
+        aspect = (orig.width_px, orig.height_px)
+
+        def ppi_of(info: ImageInfo) -> float:
+            return make_plan(info, self.spec, self.mode, Background(), item.crop,
+                             self.settings.length_step_mm, aspect).effective_ppi
+
+        result = EnhanceResult(copy, "gemini-web", 0, ENGINE_GEMINI)
+        final_info = ext_info
+        ppi = ppi_of(ext_info)
+        target = self.settings.enhance_target_ppi
+        if ppi < target and enhancer is not None:
+            passes = passes_needed(ppi, target)
+            model = choose_model(load_proxy(copy, 512))
+            local = enhancer.enhance(copy, ext_info.sha256, passes, model)
+            final_info = probe(local.path)
+            result = EnhanceResult(local.path, model, passes, f"{ENGINE_GEMINI} + {local.engine}")
+            ppi = ppi_of(final_info)
+        if item.original_diagnosis is None:
+            self.analyze(i)
+        base = item.original_diagnosis or item.diagnosis
+        item.enhanced, item.enhanced_info = result, final_info
+        if base is not None:
+            item.enhanced_diagnosis = rerate(base, ppi)
+        if item.enhance_choice == EnhanceChoice.OFF:
+            item.enhance_choice = EnhanceChoice.AUTO
+        item.error = None
+        idx = next((k for k, it in enumerate(self.items) if it is item), None)
+        if idx is not None:
+            self._revoke_approvals([idx])
+        return AttachResult(result, warning)
 
     def approve(self, i: int) -> None:
         item = self.items[i]

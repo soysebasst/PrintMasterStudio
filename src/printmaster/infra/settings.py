@@ -10,6 +10,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field, ValidationError
 
+from printmaster.core.enhance.gemini_web import DEFAULT_PROMPT
 from printmaster.core.pricing import PricingConfig
 from printmaster.domain.models import FitMode, Orientation
 from printmaster.domain.units import Unit
@@ -51,6 +52,8 @@ class Settings(BaseModel):
     price_round_to: int = Field(1000, ge=1)
     enhance_enabled: bool = True
     enhance_target_ppi: int = Field(150, ge=72, le=300)
+    gemini_prompt: str = DEFAULT_PROMPT
+    advanced_open: bool = False
     printer_id: str = "epson_sc_t3170"
     naming_prefix: str = "Cliente"
     naming_digits: int = Field(3, ge=1, le=8)
