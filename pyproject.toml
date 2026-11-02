@@ -46,3 +46,13 @@ src = ["src"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E741"]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = [
+  "printmaster.domain.models.Background",
+  "printmaster.domain.models.CropOffset",
+  "printmaster.core.pdf_writer.ExportOptions",
+  "printmaster.core.naming.NamingOptions",
+  "printmaster.domain.quality.QualityThresholds",
+]
