@@ -9,12 +9,14 @@ from pathlib import Path
 
 
 class Orientation(StrEnum):
+    AS_ENTERED = "as_entered"  # el ancho es lo que cruza el rollo; nunca se gira
     AUTO = "auto"
     PORTRAIT = "portrait"
     LANDSCAPE = "landscape"
 
 
 class FitMode(StrEnum):
+    FIT_LENGTH = "largo_auto"  # ancho fijo, largo según la proporción de la imagen
     CONTAIN = "ajustar"
     FILL = "rellenar"
     COVER = "recortar"
@@ -25,6 +27,12 @@ class BackgroundKind(StrEnum):
     COLOR = "color"
     EDGE_COLOR = "edge_color"
     BLUR = "blur"
+
+
+class EnhanceChoice(StrEnum):
+    AUTO = "auto"
+    ON = "on"
+    OFF = "off"
 
 
 class ItemStatus(StrEnum):
@@ -60,6 +68,8 @@ class PrintSpec:
     orientation: Orientation = Orientation.AUTO
 
     def resolved_for(self, img_w: int, img_h: int) -> PrintSpec:
+        if self.orientation == Orientation.AS_ENTERED:
+            return self
         short, long_ = sorted((self.width_mm, self.height_mm))
         if self.orientation == Orientation.PORTRAIT:
             return replace(self, width_mm=short, height_mm=long_)

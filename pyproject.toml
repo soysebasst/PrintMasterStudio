@@ -56,4 +56,5 @@ extend-immutable-calls = [
   "printmaster.core.pdf_writer.ExportOptions",
   "printmaster.core.naming.NamingOptions",
   "printmaster.domain.quality.QualityThresholds",
+  "printmaster.core.pricing.PricingConfig",
 ]

@@ -6,6 +6,7 @@ Coordenadas de destino en puntos PDF con origen abajo a la izquierda.
 
 from __future__ import annotations
 
+import math
 from decimal import Decimal
 
 from printmaster.domain.models import (
@@ -14,6 +15,7 @@ from printmaster.domain.models import (
     CropOffset,
     FitMode,
     ImageInfo,
+    Orientation,
     PrintSpec,
     RenderPlan,
 )
@@ -26,17 +28,39 @@ def _pt_to_mm(pt: float) -> Decimal:
     return Decimal(str(pt)) * Decimal("25.4") / Decimal(72)
 
 
+def auto_length_mm(width_mm: Decimal, img_w: int, img_h: int, step_mm: int = 50) -> Decimal:
+    """Largo de lámina para que la imagen ocupe todo el ancho, redondeado hacia arriba."""
+    exact = Decimal(width_mm) * Decimal(img_h) / Decimal(img_w)
+    steps = math.ceil(float(exact / Decimal(step_mm)) - 1e-9)
+    return Decimal(max(1, steps) * step_mm)
+
+
+def _resolved_spec(info: ImageInfo, spec: PrintSpec, mode: FitMode,
+                   length_step_mm: int) -> PrintSpec:
+    if mode == FitMode.FIT_LENGTH:
+        length = auto_length_mm(spec.width_mm, info.width_px, info.height_px, length_step_mm)
+        return PrintSpec(spec.width_mm, length, spec.ppi, Orientation.AS_ENTERED)
+    return spec.resolved_for(info.width_px, info.height_px)
+
+
+def page_size_mm(info: ImageInfo, spec: PrintSpec, mode: FitMode,
+                 length_step_mm: int = 50) -> tuple[Decimal, Decimal]:
+    s = _resolved_spec(info, spec, mode, length_step_mm)
+    return s.width_mm, s.height_mm
+
+
 def plan(
     info: ImageInfo,
     spec: PrintSpec,
     mode: FitMode,
     background: Background = Background(),
     crop: CropOffset = CropOffset(),
+    length_step_mm: int = 50,
 ) -> RenderPlan:
     if background.kind == BackgroundKind.EDGE_COLOR:
         raise ValueError("El color de borde debe resolverse antes de planificar.")
     W, H = info.width_px, info.height_px
-    s = spec.resolved_for(W, H)
+    s = _resolved_spec(info, spec, mode, length_step_mm)
     page_w_pt, page_h_pt = mm_to_pt(s.width_mm), mm_to_pt(s.height_mm)
 
     if mode == FitMode.COVER:
@@ -57,7 +81,7 @@ def plan(
         dest = ((page_w_pt - dw) / 2, (page_h_pt - dh) / 2, dw, dh)
         src_box = (0, 0, W, H)
 
-    if mode == FitMode.CONTAIN:
+    if mode in (FitMode.CONTAIN, FitMode.FIT_LENGTH):
         background = Background()
 
     sw, sh = src_box[2] - src_box[0], src_box[3] - src_box[1]
