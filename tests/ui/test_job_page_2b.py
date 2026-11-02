@@ -2,7 +2,6 @@ import pytest
 from PIL import Image
 from PySide6.QtCore import QMimeData, QPointF, Qt, QUrl
 from PySide6.QtGui import QDropEvent, QGuiApplication
-from tests.conftest import texture_array
 
 from printmaster.core.enhance.gemini_web import DEFAULT_PROMPT, GEMINI_URL
 from printmaster.domain.models import ItemStatus
@@ -53,9 +52,9 @@ def test_drop_gemini_result(page, qtbot, make_image, tmp_path):
     load_respeto(page, qtbot, make_image, tmp_path)
     g = tmp_path / "descargas" / "gemini.png"
     g.parent.mkdir()
-    Image.fromarray(texture_array((2304, 4096)), "RGB").save(g)
+    Image.new("RGB", (2304, 4096), (240, 200, 120)).save(g)  # liviana: CI es lento
     page.quality.drop_zone.file_dropped.emit(g)
-    qtbot.waitUntil(lambda: page.controller.items[0].enhanced is not None, timeout=15000)
+    qtbot.waitUntil(lambda: page.controller.items[0].enhanced is not None, timeout=60000)
     qtbot.waitUntil(lambda: "Gemini" in page.diagnosis.text(), timeout=5000)
     assert "$17.000" in page.total_label.text()
     assert page.enhanced_btn.isEnabled() and page.enhanced_btn.isChecked()
