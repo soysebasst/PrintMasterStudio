@@ -11,7 +11,6 @@ Hazlo en el PC donde vas a usar la app. Marca cada punto y anota tiempos y fallo
 ```powershell
 git clone https://github.com/soysebasst/PrintMasterStudio.git
 cd PrintMasterStudio
-git checkout fase1
 py -3.12 -m venv .venv
 .venv\Scripts\pip install -e .
 ```
