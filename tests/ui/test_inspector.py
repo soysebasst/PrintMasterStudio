@@ -48,7 +48,7 @@ def test_user_edit_updates_mm(insp):
 
 def test_custom_ppi(insp):
     insp.ppi_combo.setCurrentIndex(insp.ppi_combo.findData(-1))
-    assert insp.ppi_spin.isVisible()
+    assert not insp.ppi_spin.isHidden()
     insp.ppi_spin.setValue(175)
     assert insp.spec().ppi == 175
 

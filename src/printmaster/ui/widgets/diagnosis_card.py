@@ -58,9 +58,15 @@ class DiagnosisCard(QGroupBox):
             rows.append('<span style="color:#c39bd3">✦ Mejorando la imagen…</span>')
         elif enhanced is not None:
             einfo, res = enhanced
-            label = "Mejorada con IA" if res.engine == "Real-ESRGAN" else "Mejorada"
-            rows.append(f'<span style="color:#c39bd3">✦ {label} ({res.engine}, {res.passes} '
-                        f"pasada{'s' if res.passes != 1 else ''}): "
+            if res.engine.startswith("Gemini"):
+                detail = f"Mejorada con {res.engine}"
+            elif res.engine == "Real-ESRGAN":
+                detail = f"Mejorada con IA (Real-ESRGAN, {res.passes} pasada" \
+                         f"{'s' if res.passes != 1 else ''})"
+            else:
+                detail = f"Mejorada ({res.engine}, {res.passes} pasada" \
+                         f"{'s' if res.passes != 1 else ''})"
+            rows.append(f'<span style="color:#c39bd3">✦ {detail}: '
                         f"{einfo.width_px}×{einfo.height_px} px</span>")
         if error:
             rows.append(f'<span style="color:#ff6b6b">✕ {error}</span>')

@@ -7,12 +7,14 @@ from decimal import Decimal
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QCheckBox,
     QColorDialog,
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
-    QGroupBox,
+    QGridLayout,
+    QHBoxLayout,
     QInputDialog,
     QLabel,
     QPushButton,
@@ -21,6 +23,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from printmaster.core.pricing import format_cop
 from printmaster.domain.models import (
     Background,
     BackgroundKind,
@@ -30,7 +33,7 @@ from printmaster.domain.models import (
     PrintSpec,
 )
 from printmaster.domain.units import Unit, from_mm, to_mm
-from printmaster.infra.settings import FavoriteFormat, Settings
+from printmaster.infra.settings import FavoriteFormat, Settings, save_settings
 from printmaster.printers.profiles import ValidationIssue
 
 PPI_PRESETS = [100, 150, 200, 250, 300]
@@ -75,85 +78,134 @@ class Inspector(QWidget):
         self._timer.setInterval(DEBOUNCE_MS)
         self._timer.timeout.connect(self.changed.emit)
 
+        self._settings = settings
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(6, 6, 6, 6)
+        lay.setContentsMargins(12, 12, 12, 12)
+        lay.setSpacing(6)
 
-        fmt_box = QGroupBox("FORMATO")
-        form = QFormLayout(fmt_box)
+        def section(title: str) -> QLabel:
+            lbl = QLabel(title)
+            lbl.setObjectName("sectionTitle")
+            return lbl
+
+        # --- Tamaño -------------------------------------------------------------------
+        lay.addWidget(section("Tamaño"))
         self.favorites_combo = QComboBox()
         self.favorites_combo.setObjectName("favorites_combo")
-        form.addRow("Favoritos:", self.favorites_combo)
+        self.favorites_combo.setToolTip("Formatos favoritos")
+        lay.addWidget(self.favorites_combo)
+        size_row = QHBoxLayout()
         self.width_spin = QDoubleSpinBox()
         self.width_spin.setObjectName("width_spin")
+        self.width_spin.setToolTip("Ancho")
         self.height_spin = QDoubleSpinBox()
         self.height_spin.setObjectName("height_spin")
+        self.height_spin.setToolTip("Largo")
         for spin in (self.width_spin, self.height_spin):
             spin.setRange(0.1, 10000)
             spin.setDecimals(2)
             spin.setKeyboardTracking(False)
-        form.addRow("Ancho:", self.width_spin)
-        form.addRow("Largo:", self.height_spin)
         self.unit_combo = QComboBox()
         self.unit_combo.setObjectName("unit_combo")
         for unit, label in ((Unit.CM, "cm"), (Unit.MM, "mm"), (Unit.IN, "pulgadas")):
             self.unit_combo.addItem(label, unit)
-        form.addRow("Unidad:", self.unit_combo)
+        times = QLabel("×")
+        size_row.addWidget(self.width_spin, 3)
+        size_row.addWidget(times)
+        size_row.addWidget(self.height_spin, 4)
+        size_row.addWidget(self.unit_combo, 2)
+        lay.addLayout(size_row)
+        self.price_label = QLabel("")
+        self.price_label.setObjectName("priceLabel")
+        lay.addWidget(self.price_label)
+        self.issues_label = QLabel("")
+        self.issues_label.setObjectName("issues_label")
+        self.issues_label.setWordWrap(True)
+        self.issues_label.setTextFormat(Qt.RichText)
+        lay.addWidget(self.issues_label)
+
+        # --- Ajuste -------------------------------------------------------------------
+        lay.addSpacing(6)
+        lay.addWidget(section("Ajuste"))
+        self.mode_combo = QComboBox()  # modelo interno; se maneja con los botones
+        self.mode_combo.setObjectName("mode_combo")
+        for mode, label in MODE_LABELS:
+            self.mode_combo.addItem(label, mode)
+        self.mode_combo.setVisible(False)
+        grid = QGridLayout()
+        grid.setSpacing(6)
+        short = {FitMode.FIT_LENGTH: "Largo auto", FitMode.CONTAIN: "Ajustar",
+                 FitMode.FILL: "Rellenar", FitMode.COVER: "Recortar"}
+        self.mode_buttons: dict[FitMode, QPushButton] = {}
+        self._mode_group = QButtonGroup(self)
+        self._mode_group.setExclusive(True)
+        for k, (mode, label) in enumerate(MODE_LABELS):
+            btn = QPushButton(short[mode])
+            btn.setObjectName("segment")
+            btn.setCheckable(True)
+            btn.setToolTip(label)
+            btn.clicked.connect(lambda _c=False, m=mode: self._select_mode(m))
+            self._mode_group.addButton(btn)
+            self.mode_buttons[mode] = btn
+            grid.addWidget(btn, k // 2, k % 2)
+        lay.addLayout(grid)
+        bg_row = QHBoxLayout()
+        self.background_label = QLabel("Fondo:")
+        self.background_combo = QComboBox()
+        self.background_combo.setObjectName("background_combo")
+        for kind, label in BACKGROUND_LABELS:
+            self.background_combo.addItem(label, kind)
+        bg_row.addWidget(self.background_label)
+        bg_row.addWidget(self.background_combo, 1)
+        lay.addLayout(bg_row)
+
+        # --- Calidad (la inserta la página) -------------------------------------------
+        self._quality_index = lay.count()
+        self.enhance_combo = QComboBox()
+        self.enhance_combo.setObjectName("enhance_combo")
+        for choice, label in ENHANCE_LABELS:
+            self.enhance_combo.addItem(label, choice)
+        self.enhance_combo.setToolTip("Mejora local de la imagen seleccionada")
+
+        # --- Opciones avanzadas -------------------------------------------------------
+        self.advanced_toggle = QPushButton("▸  Opciones avanzadas")
+        self.advanced_toggle.setObjectName("linkButton")
+        self.advanced_toggle.setCheckable(True)
+        self.advanced_toggle.clicked.connect(self._toggle_advanced)
+        lay.addWidget(self.advanced_toggle)
+        self.advanced_box = QWidget()
+        adv = QFormLayout(self.advanced_box)
+        adv.setContentsMargins(0, 0, 0, 0)
         self.orientation_combo = QComboBox()
         self.orientation_combo.setObjectName("orientation_combo")
         for o, label in ((Orientation.AS_ENTERED, "Como se escribió"),
                          (Orientation.AUTO, "Automática"), (Orientation.PORTRAIT, "Vertical"),
                          (Orientation.LANDSCAPE, "Horizontal")):
             self.orientation_combo.addItem(label, o)
-        form.addRow("Orientación:", self.orientation_combo)
-        self.save_favorite_btn = QPushButton("★ Guardar formato")
-        self.save_favorite_btn.setObjectName("save_favorite_btn")
-        form.addRow("", self.save_favorite_btn)
-        lay.addWidget(fmt_box)
-
-        out_box = QGroupBox("SALIDA")
-        form2 = QFormLayout(out_box)
+        adv.addRow("Orientación:", self.orientation_combo)
         self.ppi_combo = QComboBox()
         self.ppi_combo.setObjectName("ppi_combo")
         for ppi in PPI_PRESETS:
             self.ppi_combo.addItem(f"{ppi} PPI", ppi)
         self.ppi_combo.addItem("Personalizado…", CUSTOM_PPI)
-        form2.addRow("Resolución:", self.ppi_combo)
+        adv.addRow("Resolución:", self.ppi_combo)
         self.ppi_spin = QSpinBox()
         self.ppi_spin.setObjectName("ppi_spin")
         self.ppi_spin.setRange(50, 600)
         self.ppi_spin.setSuffix(" PPI")
         self.ppi_spin.setKeyboardTracking(False)
-        form2.addRow("", self.ppi_spin)
-        self.mode_combo = QComboBox()
-        self.mode_combo.setObjectName("mode_combo")
-        for mode, label in MODE_LABELS:
-            self.mode_combo.addItem(label, mode)
-        form2.addRow("Ajuste:", self.mode_combo)
-        self.background_label = QLabel("Fondo:")
-        self.background_combo = QComboBox()
-        self.background_combo.setObjectName("background_combo")
-        for kind, label in BACKGROUND_LABELS:
-            self.background_combo.addItem(label, kind)
-        form2.addRow(self.background_label, self.background_combo)
-        self.enhance_combo = QComboBox()
-        self.enhance_combo.setObjectName("enhance_combo")
-        for choice, label in ENHANCE_LABELS:
-            self.enhance_combo.addItem(label, choice)
-        self.enhance_combo.setToolTip("Mejora con IA de la imagen seleccionada")
-        form2.addRow("Imagen:", self.enhance_combo)
+        adv.addRow("", self.ppi_spin)
         self.lossless_check = QCheckBox("Exportar sin pérdida")
         self.lossless_check.setObjectName("lossless_check")
         self.lossless_check.setChecked(True)
         self.lossless_check.setToolTip(
             "Desactivado: las fotos JPEG que deban reducirse se guardan como JPEG de calidad 95.")
-        form2.addRow("", self.lossless_check)
-        lay.addWidget(out_box)
-
-        self.issues_label = QLabel("")
-        self.issues_label.setObjectName("issues_label")
-        self.issues_label.setWordWrap(True)
-        self.issues_label.setTextFormat(Qt.RichText)
-        lay.addWidget(self.issues_label)
+        adv.addRow("", self.lossless_check)
+        self.save_favorite_btn = QPushButton("★ Guardar formato como favorito")
+        self.save_favorite_btn.setObjectName("save_favorite_btn")
+        adv.addRow("", self.save_favorite_btn)
+        lay.addWidget(self.advanced_box)
+        self._set_advanced(bool(getattr(settings, "advanced_open", False)), save=False)
         lay.addStretch(1)
 
         # valores iniciales
@@ -241,6 +293,31 @@ class Inspector(QWidget):
     def apply_favorite(self, fav: FavoriteFormat) -> None:
         self.set_spec_values(to_mm(fav.width, fav.unit), to_mm(fav.height, fav.unit), fav.unit)
 
+    def quality_insert_index(self) -> int:
+        return self._quality_index
+
+    def set_price(self, price: int | None) -> None:
+        self.price_label.setText(f"{format_cop(price)} sugerido" if price is not None else "")
+
+    def _select_mode(self, mode: FitMode) -> None:
+        self.mode_combo.setCurrentIndex(self.mode_combo.findData(mode))
+
+    def _sync_mode_buttons(self) -> None:
+        current = self.mode_combo.currentData()
+        for mode, btn in self.mode_buttons.items():
+            btn.setChecked(mode == current)
+
+    def _set_advanced(self, open_: bool, save: bool = True) -> None:
+        self.advanced_toggle.setChecked(open_)
+        self.advanced_toggle.setText(("▾" if open_ else "▸") + "  Opciones avanzadas")
+        self.advanced_box.setVisible(open_)
+        if save and getattr(self._settings, "advanced_open", None) != open_:
+            self._settings.advanced_open = open_
+            save_settings(self._settings)
+
+    def _toggle_advanced(self) -> None:
+        self._set_advanced(self.advanced_toggle.isChecked())
+
     def set_calculated_length(self, mm: Decimal | None) -> None:
         """Largo calculado por el modo automático para la imagen actual (solo lectura)."""
         if mm is None or self.mode() != FitMode.FIT_LENGTH:
@@ -297,6 +374,7 @@ class Inspector(QWidget):
         self._emit()
 
     def _update_visibility(self) -> None:
+        self._sync_mode_buttons()
         self.ppi_spin.setVisible(self.ppi_combo.currentData() == CUSTOM_PPI)
         fill = self.mode_combo.currentData() == FitMode.FILL
         self.background_combo.setVisible(fill)

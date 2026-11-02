@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import subprocess
 import threading
 from collections import OrderedDict
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Qt, QThreadPool, QUrl, Signal
-from PySide6.QtGui import QDesktopServices, QImage
+from PySide6.QtGui import QDesktopServices, QGuiApplication, QImage
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -22,6 +23,7 @@ from PySide6.QtWidgets import (
 
 from printmaster.app_services.job_controller import JobController, JobItem
 from printmaster.core.enhance.enhancer import ENGINE_AI, Enhancer, EnhanceResult
+from printmaster.core.enhance.gemini_web import GEMINI_URL, reveal_command
 from printmaster.core.enhance.installer import find_engine
 from printmaster.core.enhance.realesrgan import EnhanceCancelled
 from printmaster.core.image_loader import load_proxy
@@ -33,9 +35,9 @@ from printmaster.infra.settings import FavoriteFormat, Settings
 from printmaster.printers.profiles import PrinterProfile
 from printmaster.ui.models.queue_model import QueueModel
 from printmaster.ui.qt_images import pil_to_qimage
-from printmaster.ui.widgets.diagnosis_card import DiagnosisCard
 from printmaster.ui.widgets.inspector import Inspector
 from printmaster.ui.widgets.preview_canvas import PreviewCanvas
+from printmaster.ui.widgets.quality_panel import QualityPanel
 from printmaster.ui.widgets.queue_view import QueueView
 from printmaster.ui.workers import run_async
 
@@ -66,6 +68,7 @@ class JobPage(QWidget):
         self._enhancing: JobItem | None = None
         self._cancel_enhance = threading.Event()
         self._show_original = False
+        self._gemini_hint: str | None = None
         self._exporting = False
         self._pending_settings: Settings | None = None
         self._bridge = _ProgressBridge()
@@ -107,10 +110,12 @@ class JobPage(QWidget):
         side_lay = QVBoxLayout(side)
         side_lay.setContentsMargins(0, 0, 0, 0)
         self.inspector = Inspector(settings)
-        self.diagnosis = DiagnosisCard()
+        self.quality = QualityPanel()
+        self.diagnosis = self.quality  # compatibilidad: show_diagnosis() / text()
+        self.inspector.layout().insertWidget(self.inspector.quality_insert_index(), self.quality)
+        self.quality.choice_row.addWidget(self.inspector.enhance_combo, 1)
         side_lay.addWidget(self.inspector)
-        side_lay.addWidget(self.diagnosis)
-        side_lay.addStretch(1)
+        self.side_panel = side
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setWidget(side)
@@ -149,6 +154,8 @@ class JobPage(QWidget):
         self.before_after_btn.clicked.connect(self._toggle_before_after)
         self.cancel_enhance_btn.clicked.connect(self._cancel_enhancements)
         self.inspector.enhance_choice_changed.connect(self._on_enhance_choice)
+        self.quality.gemini_btn.clicked.connect(self._on_gemini)
+        self.quality.drop_zone.file_dropped.connect(self._on_external_dropped)
         self.queue.current_changed.connect(self._on_current_changed)
         self.queue.paths_added.connect(self._on_paths_added)
         self.model.rowsRemoved.connect(lambda *a: self._after_queue_change())
@@ -563,3 +570,72 @@ class JobPage(QWidget):
         self._show_original = not self._show_original
         self._redraw_current()
         self._update_state()
+
+    # --- Gemini web (gratis, semiautomático) ----------------------------------------
+    def _open_url(self, url: str) -> None:
+        QDesktopServices.openUrl(QUrl(url))
+
+    def _reveal(self, path: Path) -> None:
+        try:
+            subprocess.Popen(reveal_command(path))  # noqa: S603
+        except OSError:
+            pass
+
+    def _on_gemini(self) -> None:
+        i = self._current_index()
+        if i < 0:
+            return
+        item = self.controller.items[i]
+        QGuiApplication.clipboard().setText(self.settings.gemini_prompt)
+        self._open_url(GEMINI_URL)
+        self._reveal(item.path)
+        self._gemini_hint = ("Prompt copiado. En Gemini: sube la imagen, pega con Ctrl+V y "
+                             "descarga el resultado. Luego suéltalo en «Suelta aquí la mejorada».")
+        self._update_state()
+
+    def _on_external_dropped(self, path: Path) -> None:
+        i = self._current_index()
+        if i < 0 or self._exporting:
+            return
+        item = self.controller.items[i]
+        item.enhancing = True
+        self.model.refresh(i)
+        self._show_diagnosis(i)
+        run_async(self._attach, item, Path(path),
+                  on_done=lambda res, it=item: self._attach_done(it, res),
+                  on_failed=lambda msg, it=item: self._attach_failed(it, msg), owner=self)
+
+    def _attach(self, item: JobItem, path: Path):
+        try:
+            row = self._row_of(item)
+            if row < 0:
+                return None
+            return self.controller.attach_external(row, path, self.enhancer)
+        finally:
+            item.enhancing = False
+
+    def _attach_done(self, item: JobItem, res) -> None:
+        item.enhancing = False
+        self._gemini_hint = None
+        self._show_original = False
+        row = self._row_of(item)
+        if row >= 0:
+            self.model.refresh(row)
+            if row == self._current_index():
+                self._show_diagnosis(row)
+                self._redraw_current()
+        self._update_state()
+        if res is not None and res.aspect_warning:
+            self._info("Mejora con Gemini",
+                       "La imagen mejorada tiene otra proporción (Gemini la recortó o "
+                       "extendió). Se ajustará sin deformarla.")
+
+    def _attach_failed(self, item: JobItem, message: str) -> None:
+        item.enhancing = False
+        row = self._row_of(item)
+        if row >= 0:
+            self.model.refresh(row)
+            if row == self._current_index():
+                self._show_diagnosis(row)
+        self._update_state()
+        self._info("Mejora con Gemini", f"No se pudo usar esa imagen: {message}")

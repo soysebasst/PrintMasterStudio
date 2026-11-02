@@ -1,0 +1,158 @@
+"""Sección «Calidad»: nivel, recomendación, mejora con Gemini web y detalles."""
+
+from __future__ import annotations
+
+from decimal import Decimal
+from pathlib import Path
+
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+
+from printmaster.core.enhance.enhancer import ENGINE_AI, EnhanceResult
+from printmaster.core.image_analyzer import Diagnosis
+from printmaster.core.image_loader import SUPPORTED_EXTENSIONS
+from printmaster.domain.models import ImageInfo
+from printmaster.domain.quality import QualityLevel
+from printmaster.ui.widgets.diagnosis_card import DiagnosisCard
+
+SHORT = {
+    QualityLevel.EXCELENTE: "Excelente", QualityLevel.BUENA: "Buena",
+    QualityLevel.ACEPTABLE: "Aceptable", QualityLevel.BAJA: "Baja",
+    QualityLevel.MUY_BAJA: "Muy baja",
+}
+CHIP_STYLE = {  # fondo, texto
+    QualityLevel.EXCELENTE: ("#1b3326", "#7ee787"), QualityLevel.BUENA: ("#1b3326", "#7ee787"),
+    QualityLevel.ACEPTABLE: ("#3a3018", "#f0c15a"), QualityLevel.BAJA: ("#3d2a18", "#ffab70"),
+    QualityLevel.MUY_BAJA: ("#3d1f22", "#ff8a8a"),
+}
+GEMINI_NOTE = "Gemini redibuja la imagen: revise textos, logos y caras antes de aprobar."
+
+
+class DropZone(QLabel):
+    """Zona para soltar (o elegir) la versión mejorada descargada de Gemini."""
+
+    file_dropped = Signal(object)  # Path
+
+    def __init__(self, parent=None) -> None:
+        super().__init__("Suelta aquí la mejorada\no haz clic para elegirla", parent)
+        self.setObjectName("dropZone")
+        self.setAlignment(Qt.AlignCenter)
+        self.setAcceptDrops(True)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setMinimumHeight(54)
+
+    def dragEnterEvent(self, event) -> None:  # noqa: N802
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event) -> None:  # noqa: N802
+        urls = [u for u in event.mimeData().urls() if u.isLocalFile()]
+        if urls:
+            self.file_dropped.emit(Path(urls[0].toLocalFile()))
+            event.acceptProposedAction()
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        exts = " ".join(f"*{e}" for e in sorted(SUPPORTED_EXTENSIONS))
+        file, _ = QFileDialog.getOpenFileName(self, "Elegir imagen mejorada", "",
+                                              f"Imágenes ({exts})")
+        if file:
+            self.file_dropped.emit(Path(file))
+
+
+class QualityPanel(QWidget):
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(12, 4, 12, 4)
+        lay.setSpacing(6)
+        title = QLabel("Calidad")
+        title.setObjectName("sectionTitle")
+        lay.addWidget(title)
+        chip_row = QHBoxLayout()
+        self.level_chip = QLabel("—")
+        self.level_chip.setObjectName("chip")
+        chip_row.addWidget(self.level_chip)
+        chip_row.addStretch(1)
+        lay.addLayout(chip_row)
+        self.recommendation_label = QLabel("")
+        self.recommendation_label.setWordWrap(True)
+        self.recommendation_label.setObjectName("muted")
+        lay.addWidget(self.recommendation_label)
+        self.status_label = QLabel("")
+        self.status_label.setWordWrap(True)
+        self.status_label.setTextFormat(Qt.RichText)
+        lay.addWidget(self.status_label)
+        self.gemini_btn = QPushButton("✦  Mejorar en Gemini")
+        self.gemini_btn.setToolTip("Copia el prompt, abre Gemini y la carpeta de la imagen")
+        lay.addWidget(self.gemini_btn)
+        self.drop_zone = DropZone()
+        lay.addWidget(self.drop_zone)
+        self.note_label = QLabel(GEMINI_NOTE)
+        self.note_label.setWordWrap(True)
+        self.note_label.setObjectName("hint")
+        lay.addWidget(self.note_label)
+        self.choice_row = QHBoxLayout()
+        lay.addLayout(self.choice_row)
+        self.actions_row = QHBoxLayout()
+        lay.addLayout(self.actions_row)
+        self.details_toggle = QPushButton("▸  Ver detalles")
+        self.details_toggle.setObjectName("linkButton")
+        self.details_toggle.setCheckable(True)
+        self.details_toggle.clicked.connect(self._toggle_details)
+        lay.addWidget(self.details_toggle)
+        self.details = DiagnosisCard()
+        self.details.setVisible(False)
+        lay.addWidget(self.details)
+
+    def _toggle_details(self) -> None:
+        open_ = self.details_toggle.isChecked()
+        self.details.setVisible(open_)
+        self.details_toggle.setText(("▾" if open_ else "▸") + "  Ver detalles")
+
+    def text(self) -> str:
+        return "\n".join([self.level_chip.text(), self.recommendation_label.text(),
+                          self.status_label.text(), self.details.text()])
+
+    def show_item(self, diag: Diagnosis | None, info: ImageInfo | None, *,
+                  price: int | None = None, page_mm: tuple[Decimal, Decimal] | None = None,
+                  enhanced: tuple[ImageInfo, EnhanceResult] | None = None,
+                  enhancing: bool = False, error: str | None = None,
+                  downsample_ppi: int | None = None) -> None:
+        if diag is not None:
+            bg, fg = CHIP_STYLE[diag.level]
+            self.level_chip.setText(f"{SHORT[diag.level]} · {diag.effective_ppi:.0f} PPI")
+            self.level_chip.setStyleSheet(f"background:{bg}; color:{fg};")
+            self.recommendation_label.setText(diag.recommendation)
+        else:
+            self.level_chip.setText("Analizando…" if info is not None else "—")
+            self.level_chip.setStyleSheet("")
+            self.recommendation_label.setText("")
+        if enhancing:
+            status = '<span style="color:#c9a7ff">✦ Mejorando la imagen…</span>'
+        elif enhanced is not None:
+            einfo, res = enhanced
+            if res.engine.startswith("Gemini"):
+                what = f"Mejorada con {res.engine}"
+            elif res.engine == ENGINE_AI:
+                what = "Mejorada con IA (Real-ESRGAN)"
+            else:
+                what = "Mejorada (mejora básica)"
+            status = (f'<span style="color:#c9a7ff">✦ {what}</span> · '
+                      f"{einfo.width_px}×{einfo.height_px} px")
+        else:
+            status = ""
+        if error:
+            status += ("<br>" if status else "") + f'<span style="color:#ff8a8a">✕ {error}</span>'
+        self.status_label.setText(status)
+        self.status_label.setVisible(bool(status))
+        has_item = info is not None
+        for w in (self.gemini_btn, self.drop_zone):
+            w.setEnabled(has_item)
+        self.details.show_diagnosis(diag, info, downsample_ppi, error, price=price,
+                                    page_mm=page_mm, enhanced=enhanced, enhancing=enhancing)
+
+    # compatibilidad con la API de DiagnosisCard
+    def show_diagnosis(self, diag, info, downsample_ppi=None, error=None, price=None,
+                       page_mm=None, enhanced=None, enhancing=False) -> None:
+        self.show_item(diag, info, price=price, page_mm=page_mm, enhanced=enhanced,
+                       enhancing=enhancing, error=error, downsample_ppi=downsample_ppi)
