@@ -29,6 +29,9 @@ from printmaster.domain.quality import (
 BLUR_THRESHOLD = 3.2
 NOISE_THRESHOLD = 8.0
 BLOCK_THRESHOLD = 1.5
+# Si el proxy fue reducido, la cuadrícula 8×8 ya no está alineada: se usa la calidad JPEG
+# estimada (leída de las tablas del archivo original) como indicador de artefactos.
+LOW_JPEG_QUALITY = 30
 ANALYSIS_SIDE = 1024
 
 # Tabla estándar de luminancia JPEG (Anexo K, ITU-T T.81).
@@ -115,6 +118,50 @@ def estimate_jpeg_quality(img: Image.Image) -> int | None:
     return best
 
 
+def _jpeg_quality_for(info: ImageInfo, proxy: Image.Image) -> int | None:
+    q = estimate_jpeg_quality(proxy)
+    if q is not None or info.format != "JPEG":
+        return q
+    try:
+        with Image.open(info.path) as original:  # solo cabeceras: no decodifica píxeles
+            return estimate_jpeg_quality(original)
+    except (OSError, ValueError):
+        return None
+
+
+def rerate(
+    diag: Diagnosis,
+    effective_ppi: float,
+    thresholds: QualityThresholds = DEFAULT_THRESHOLDS,
+) -> Diagnosis:
+    """Recalifica con un PPI efectivo nuevo usando las métricas ya medidas (sin decodificar)."""
+    return _finalize(effective_ppi, diag.sharpness, diag.noise_sigma, diag.blockiness,
+                     diag.jpeg_quality, thresholds)
+
+
+def _finalize(effective_ppi, sharpness, noise, blocks, jpeg_q, thresholds) -> Diagnosis:
+    base = classify(effective_ppi, thresholds)
+    warnings: list[str] = []
+    if sharpness < BLUR_THRESHOLD:
+        warnings.append(MSG_BLUR)
+    if noise > NOISE_THRESHOLD:
+        warnings.append(MSG_NOISE)
+    if blocks > BLOCK_THRESHOLD or (jpeg_q is not None and jpeg_q <= LOW_JPEG_QUALITY):
+        warnings.append(MSG_BLOCKS)
+    level = downgrade(base) if warnings else base
+    if base in (QualityLevel.BAJA, QualityLevel.MUY_BAJA):
+        warnings.append(f"Pocos píxeles para este tamaño: {effective_ppi:.0f} PPI efectivos.")
+
+    if base in (QualityLevel.BAJA, QualityLevel.MUY_BAJA):
+        rec = REC_UPSCALE
+    elif not warnings:
+        rec = REC_KEEP
+    else:
+        rec = REC_REVIEW
+    return Diagnosis(effective_ppi, base, level, sharpness, noise, blocks, jpeg_q,
+                     tuple(warnings), rec)
+
+
 def analyze(
     info: ImageInfo,
     proxy: Image.Image,
@@ -124,28 +171,9 @@ def analyze(
     gray = np.asarray(proxy.convert("L"))
     sharpness = measure_sharpness(gray)
     noise = estimate_noise(_resize_long(gray))
-    blocks = measure_blockiness(gray) if info.format == "JPEG" or hasattr(
-        proxy, "quantization") else 1.0
-    jpeg_q = estimate_jpeg_quality(proxy)
-
-    base = classify(effective_ppi, thresholds)
-    warnings: list[str] = []
-    if sharpness < BLUR_THRESHOLD:
-        warnings.append(MSG_BLUR)
-    if noise > NOISE_THRESHOLD:
-        warnings.append(MSG_NOISE)
-    if blocks > BLOCK_THRESHOLD:
-        warnings.append(MSG_BLOCKS)
-    level = downgrade(base) if warnings else base
-    if base in (QualityLevel.BAJA, QualityLevel.MUY_BAJA):
-        warnings.append(f"Pocos píxeles para este tamaño: {effective_ppi:.0f} PPI efectivos.")
-
-    if base in (QualityLevel.BAJA, QualityLevel.MUY_BAJA):
-        rec = REC_UPSCALE
-    elif level in (QualityLevel.EXCELENTE, QualityLevel.BUENA, QualityLevel.ACEPTABLE) and \
-            not warnings:
-        rec = REC_KEEP
-    else:
-        rec = REC_REVIEW
-    return Diagnosis(effective_ppi, base, level, sharpness, noise, blocks, jpeg_q,
-                     tuple(warnings), rec)
+    jpeg_q = _jpeg_quality_for(info, proxy)
+    full_res = proxy.size == (info.width_px, info.height_px)
+    blocks = measure_blockiness(gray) if info.format == "JPEG" and full_res else 1.0
+    if hasattr(proxy, "quantization") and getattr(proxy, "quantization", None):
+        blocks = measure_blockiness(gray)
+    return _finalize(effective_ppi, sharpness, noise, blocks, jpeg_q, thresholds)

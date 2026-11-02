@@ -142,7 +142,7 @@ def write_pdf(
         pdf.docinfo["/Title"] = info.path.name
         pdf.docinfo["/Creator"] = f"PrintMaster Studio {__version__}"
         pdf.docinfo["/Subject"] = f"{w_mm}×{h_mm} mm · {plan.effective_ppi:.0f} PPI efectivos"
-        pdf.save(tmp)
+        pdf.save(tmp, min_version="1.6")  # SMask (1.4) y PrintScaling (1.6)
         os.replace(tmp, out_path)
     except Exception as exc:  # noqa: BLE001 - cualquier fallo se reporta igual
         tmp.unlink(missing_ok=True)

@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import OrderedDict
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Qt, QUrl, Signal
+from PySide6.QtCore import QObject, Qt, QThreadPool, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QImage
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -34,6 +34,7 @@ from printmaster.ui.widgets.queue_view import QueueView
 from printmaster.ui.workers import run_async
 
 PREVIEW_SIDE = 1600
+MAX_BACKGROUND_THREADS = 2  # especificación R5: como máximo 2 imágenes decodificándose a la vez
 PREVIEW_CACHE = 8
 STEPS = ["① Cargar", "② Formato", "③ Revisar", "④ Exportar"]
 
@@ -45,12 +46,15 @@ class _ProgressBridge(QObject):
 class JobPage(QWidget):
     def __init__(self, settings: Settings, profile: PrinterProfile, parent=None) -> None:
         super().__init__(parent)
+        pool = QThreadPool.globalInstance()
+        pool.setMaxThreadCount(min(pool.maxThreadCount(), MAX_BACKGROUND_THREADS))
         self.settings = settings
         self.profile = profile
         self.controller = JobController(settings, profile)
         self.model = QueueModel(self.controller)
         self._previews: OrderedDict[Path, QImage] = OrderedDict()
         self._exporting = False
+        self._pending_settings: Settings | None = None
         self._bridge = _ProgressBridge()
         self._bridge.progress.connect(self._on_progress)
 
@@ -135,9 +139,14 @@ class JobPage(QWidget):
 
     # --- integración con la ventana -------------------------------------------------
     def apply_favorite(self, fav: FavoriteFormat) -> None:
+        if self._exporting:
+            return
         self.inspector.apply_favorite(fav)
 
     def set_settings(self, settings: Settings) -> None:
+        if self._exporting:
+            self._pending_settings = settings
+            return
         self.settings = settings
         self.controller.settings = settings
         self.controller.naming = type(self.controller.naming)(
@@ -205,7 +214,7 @@ class JobPage(QWidget):
                 continue
             run_async(self._analyze_item, item,
                       on_done=lambda _r, it=item: self._analysis_done(it),
-                      on_failed=lambda _msg: None, owner=self)
+                      on_failed=lambda _msg, it=item: self._analysis_done(it), owner=self)
 
     def _row_of(self, item: JobItem) -> int:
         for i, it in enumerate(self.controller.items):
@@ -234,13 +243,20 @@ class JobPage(QWidget):
         self.controller.export_options = ExportOptions(lossless=self.inspector.lossless())
 
     def _on_params_changed(self) -> None:
+        if self._exporting:
+            return
+        # El controlador recalifica al instante con el PPI nuevo (sin volver a decodificar).
         self._apply_params()
         self.model.refresh()
         self._redraw_current()
-        self._schedule_analysis(list(self.controller.items))
+        cur = self._current_index()
+        if cur >= 0:
+            self._show_diagnosis(cur)
         self._update_state()
 
     def _on_crop_changed(self, crop) -> None:
+        if self._exporting:
+            return
         i = self._current_index()
         if i >= 0:
             self.controller.set_crop(i, crop)
@@ -331,8 +347,7 @@ class JobPage(QWidget):
             return
         self._exporting = True
         self.progress.setValue(0)
-        self.queue.setEnabled(False)
-        self.inspector.setEnabled(False)
+        self._set_inputs_enabled(False)
         self._update_state()
         out_dir = Path(self.settings.output_dir)
         run_async(self.controller.export, None, out_dir,
@@ -343,10 +358,16 @@ class JobPage(QWidget):
     def _on_progress(self, k: int, n: int) -> None:
         self.progress.setValue(round(100 * k / n) if n else 100)
 
+    def _set_inputs_enabled(self, enabled: bool) -> None:
+        for w in (self.queue, self.inspector, self.canvas):
+            w.setEnabled(enabled)
+
     def _finish_export(self) -> None:
         self._exporting = False
-        self.queue.setEnabled(True)
-        self.inspector.setEnabled(True)
+        self._set_inputs_enabled(True)
+        pending, self._pending_settings = self._pending_settings, None
+        if pending is not None:
+            self.set_settings(pending)
         self.model.refresh()
         self._update_state()
 

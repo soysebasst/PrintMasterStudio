@@ -93,3 +93,20 @@ def test_param_change_keeps_selection_and_preview(page, qtbot, make_image, tmp_p
     assert page.queue.current_row() == 1
     assert page.canvas.page_item is not None
     qtbot.waitUntil(lambda: "Analizando" not in page.diagnosis.text(), timeout=5000)
+
+
+def test_thread_pool_limited(page):
+    from PySide6.QtCore import QThreadPool
+    assert QThreadPool.globalInstance().maxThreadCount() <= 2
+
+
+def test_inputs_frozen_while_exporting(page, qtbot, make_image, tmp_path):
+    from printmaster.infra.settings import FavoriteFormat
+    page.inspector.set_spec_values(D(100), D(150), Unit.CM)
+    qtbot.wait(300)
+    page._exporting = True
+    page._set_inputs_enabled(False)
+    page.apply_favorite(FavoriteFormat(name="x", width=D(40), height=D(60)))
+    qtbot.wait(300)
+    assert page.inspector.spec().width_mm == D(1000) / 10
+    assert not page.canvas.isEnabled()

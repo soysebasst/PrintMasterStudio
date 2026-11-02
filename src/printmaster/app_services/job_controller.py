@@ -13,7 +13,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from printmaster.core.color import edge_color
-from printmaster.core.image_analyzer import Diagnosis
+from printmaster.core.image_analyzer import Diagnosis, rerate
 from printmaster.core.image_analyzer import analyze as analyze_image
 from printmaster.core.image_loader import ImageLoadError, collect_images, load_proxy, probe
 from printmaster.core.layout import plan as make_plan
@@ -48,6 +48,17 @@ class JobItem:
     duplicate_of: int | None = None
     error: str | None = None
     output: Path | None = None
+
+
+@dataclass(frozen=True)
+class JobParams:
+    """Parámetros congelados al iniciar una exportación."""
+
+    spec: PrintSpec
+    mode: FitMode
+    background: Background
+    naming: NamingOptions
+    export_options: ExportOptions
 
 
 @dataclass
@@ -114,10 +125,27 @@ class JobController:
 
     # --- parámetros -----------------------------------------------------------------
     def _revoke_approvals(self, indices: Iterable[int] | None = None) -> None:
-        targets = range(len(self.items)) if indices is None else indices
+        """Tras un cambio de parámetros: quita aprobaciones, recupera ítems que fallaron al
+        exportar y recalifica al instante con el PPI efectivo nuevo (sin decodificar)."""
+        targets = list(range(len(self.items)) if indices is None else indices)
         for i in targets:
-            if self.items[i].status in (ItemStatus.APPROVED, ItemStatus.EXPORTED):
-                self.items[i].status = ItemStatus.READY
+            item = self.items[i]
+            if item.status in (ItemStatus.APPROVED, ItemStatus.EXPORTED):
+                item.status = ItemStatus.READY
+            elif (item.status == ItemStatus.ERROR and item.info is not None
+                  and item.diagnosis is not None):
+                item.status = ItemStatus.READY
+                item.error = None
+            self._rerate(i)
+
+    def _rerate(self, i: int) -> None:
+        item = self.items[i]
+        if item.info is None or item.diagnosis is None:
+            return
+        # El PPI efectivo no depende del fondo: se planifica con fondo blanco para no
+        # decodificar la imagen (el color de borde requiere leerla).
+        p = make_plan(item.info, self.spec, self.mode, Background(), item.crop)
+        item.diagnosis = rerate(item.diagnosis, p.effective_ppi)
 
     def set_spec(self, spec: PrintSpec) -> None:
         if spec != self.spec:
@@ -148,23 +176,36 @@ class JobController:
         info = self.items[idx].info
         return self.spec.resolved_for(info.width_px, info.height_px)
 
-    def issues(self, i: int | None = None) -> list[ValidationIssue]:
-        return validate(self.resolved_spec(i), self.profile)
+    def issues(self, i: int | None = None, spec: PrintSpec | None = None) -> list[ValidationIssue]:
+        base = spec or self.spec
+        idx = i if i is not None else next(
+            (k for k, it in enumerate(self.items) if it.info is not None), None)
+        if idx is None or self.items[idx].info is None:
+            return validate(base, self.profile)
+        info = self.items[idx].info
+        return validate(base.resolved_for(info.width_px, info.height_px), self.profile)
 
-    def _resolved_background(self, item: JobItem) -> Background:
-        bg = self.background
+    def _resolved_background(self, item: JobItem, bg: Background | None = None) -> Background:
+        bg = bg if bg is not None else self.background
         if bg.kind != BackgroundKind.EDGE_COLOR:
             return bg
         if item.path not in self._edge_cache:
             self._edge_cache[item.path] = edge_color(load_proxy(item.path, 512))
         return replace(bg, kind=BackgroundKind.COLOR, color=self._edge_cache[item.path])
 
-    def plan_for(self, i: int) -> RenderPlan:
+    def current_params(self) -> JobParams:
+        return JobParams(self.spec, self.mode, self.background, self.naming,
+                         self.export_options)
+
+    def plan_for(self, i: int, params: JobParams | None = None,
+                 crop: CropOffset | None = None) -> RenderPlan:
         item = self.items[i]
         if item.info is None:
             raise ValueError(item.error or "La imagen no se pudo leer.")
-        return make_plan(item.info, self.spec, self.mode, self._resolved_background(item),
-                         item.crop)
+        params = params or self.current_params()
+        bg = self._resolved_background(item, params.background)
+        return make_plan(item.info, params.spec, params.mode, bg,
+                         crop if crop is not None else item.crop)
 
     # --- diagnóstico y aprobación ---------------------------------------------------
     def analyze(self, i: int) -> Diagnosis:
@@ -172,11 +213,23 @@ class JobController:
         if item.info is None:
             raise ValueError(item.error or "La imagen no se pudo leer.")
         p = self.plan_for(i)
-        diag = analyze_image(item.info, load_proxy(item.path), p.effective_ppi)
+        try:
+            proxy = load_proxy(item.path)
+        except ImageLoadError as exc:
+            item.status = ItemStatus.ERROR
+            item.error = str(exc)
+            log.warning("%s", exc)
+            raise
+        diag = analyze_image(item.info, proxy, p.effective_ppi)
+        # Los parámetros pudieron cambiar durante el análisis: calificar con los actuales.
+        current = make_plan(item.info, self.spec, self.mode, Background(), item.crop)
+        diag = rerate(diag, current.effective_ppi)
         item.diagnosis = diag
-        if item.status in (ItemStatus.PENDING, ItemStatus.ANALYZED, ItemStatus.READY):
+        if item.status in (ItemStatus.PENDING, ItemStatus.ANALYZED, ItemStatus.READY,
+                           ItemStatus.ERROR):
             item.status = ItemStatus.ANALYZED
             item.status = ItemStatus.READY
+            item.error = None
         return diag
 
     def approve(self, i: int) -> None:
@@ -196,6 +249,14 @@ class JobController:
         return skipped
 
     # --- exportación ----------------------------------------------------------------
+    def _index_of(self, item: JobItem, hint: int) -> int:
+        if 0 <= hint < len(self.items) and self.items[hint] is item:
+            return hint
+        for j, it in enumerate(self.items):
+            if it is item:
+                return j
+        return hint
+
     def export(
         self,
         indices: Sequence[int] | None,
@@ -203,24 +264,29 @@ class JobController:
         progress: Callable[[int, int], None] | None = None,
         today: date | None = None,
     ) -> list[ExportResult]:
-        errors = [x for x in self.issues() if x.level == "error"]
+        params = self.current_params()  # congelados: cambios posteriores no afectan el lote
+        errors = [x for x in self.issues(spec=params.spec) if x.level == "error"]
         if errors:
             raise ValueError(errors[0].message)
         today = today or date.today()
         targets = list(indices) if indices is not None else [
             i for i, it in enumerate(self.items) if it.status == ItemStatus.APPROVED]
+        jobs = [(i, self.items[i], self.items[i].crop) for i in targets]
         results: list[ExportResult] = []
-        total = len(targets)
-        for k, i in enumerate(targets):
-            item = self.items[i]
+        total = len(jobs)
+        for k, (i, item, crop) in enumerate(jobs):
+            i = self._index_of(item, i)
             try:
                 if item.info is None:
                     raise ValueError(item.error or "La imagen no se pudo leer.")
-                own_errors = [x for x in self.issues(i) if x.level == "error"]
+                own_errors = [x for x in validate(
+                    params.spec.resolved_for(item.info.width_px, item.info.height_px),
+                    self.profile) if x.level == "error"]
                 if own_errors:
                     raise ValueError(own_errors[0].message)
-                out = unique_path(output_path(out_dir, k, item.path, self.naming, today))
-                write_pdf(item.info, self.plan_for(i), out, self.export_options)
+                out = unique_path(output_path(out_dir, k, item.path, params.naming, today))
+                write_pdf(item.info, self.plan_for(i, params, crop), out,
+                          params.export_options)
             except (PdfExportError, ImageLoadError, ValueError, OSError) as exc:
                 item.status = ItemStatus.ERROR
                 item.error = str(exc)
