@@ -103,3 +103,9 @@ def test_jpeg_artifacts_warning(q):
     d = analyze(info_for("JPEG"), jpeg_at(q), 300)
     assert "Artefactos de compresión JPEG." in d.warnings
     assert d.jpeg_quality is not None
+
+
+def test_small_sharp_image_not_flagged_blurry():
+    small = Image.fromarray(texture_array((236, 420)), "RGB")
+    d = analyze(info_for(), small, 300)
+    assert "Posible desenfoque." not in d.warnings

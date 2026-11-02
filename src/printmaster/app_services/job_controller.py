@@ -6,6 +6,7 @@ No depende de Qt: la interfaz lo usa y lo ejecuta en hilos de fondo.
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, replace
 from datetime import date
@@ -13,6 +14,13 @@ from decimal import Decimal
 from pathlib import Path
 
 from printmaster.core.color import edge_color
+from printmaster.core.enhance.enhancer import (
+    EnhanceError,
+    Enhancer,
+    EnhanceResult,
+    choose_model,
+    passes_needed,
+)
 from printmaster.core.image_analyzer import Diagnosis, rerate
 from printmaster.core.image_analyzer import analyze as analyze_image
 from printmaster.core.image_loader import ImageLoadError, collect_images, load_proxy, probe
@@ -25,13 +33,14 @@ from printmaster.domain.models import (
     Background,
     BackgroundKind,
     CropOffset,
+    EnhanceChoice,
     FitMode,
     ImageInfo,
     ItemStatus,
     PrintSpec,
     RenderPlan,
 )
-from printmaster.domain.quality import QualityLevel
+from printmaster.domain.quality import QualityLevel, classify
 from printmaster.infra.settings import Settings
 from printmaster.printers.profiles import PrinterProfile, ValidationIssue, validate
 
@@ -50,6 +59,16 @@ class JobItem:
     duplicate_of: int | None = None
     error: str | None = None
     output: Path | None = None
+    enhance_choice: EnhanceChoice = EnhanceChoice.AUTO
+    enhanced: EnhanceResult | None = None
+    enhanced_info: ImageInfo | None = None
+    enhancing: bool = False
+    original_diagnosis: Diagnosis | None = None
+    enhanced_diagnosis: Diagnosis | None = None
+
+    @property
+    def uses_enhanced(self) -> bool:
+        return self.enhanced_info is not None and self.enhance_choice != EnhanceChoice.OFF
 
 
 @dataclass(frozen=True)
@@ -145,13 +164,22 @@ class JobController:
 
     def _rerate(self, i: int) -> None:
         item = self.items[i]
-        if item.info is None or item.diagnosis is None:
+        base = item.enhanced_diagnosis if item.uses_enhanced else item.original_diagnosis
+        base = base or item.diagnosis
+        if item.info is None or base is None:
             return
         # El PPI efectivo no depende del fondo: se planifica con fondo blanco para no
         # decodificar la imagen (el color de borde requiere leerla).
-        p = make_plan(item.info, self.spec, self.mode, Background(), item.crop,
+        p = make_plan(self.source_info(i), self.spec, self.mode, Background(), item.crop,
                       self.settings.length_step_mm)
-        item.diagnosis = rerate(item.diagnosis, p.effective_ppi)
+        item.diagnosis = rerate(base, p.effective_ppi)
+
+    def source_info(self, i: int) -> ImageInfo:
+        """Imagen que realmente se imprime: la mejorada si existe y no se desactivó."""
+        item = self.items[i]
+        if item.info is None:
+            raise ValueError(item.error or "La imagen no se pudo leer.")
+        return item.enhanced_info if item.uses_enhanced else item.info  # type: ignore[return-value]
 
     def set_spec(self, spec: PrintSpec) -> None:
         if spec != self.spec:
@@ -193,16 +221,12 @@ class JobController:
 
     def _page_spec(self, i: int, spec: PrintSpec, mode: FitMode, step: int) -> PrintSpec:
         """Formato de página ya resuelto para el ítem (largo automático incluido)."""
-        info = self.items[i].info
-        assert info is not None
-        w, h = page_size_mm(info, spec, mode, step)
+        w, h = page_size_mm(self.source_info(i), spec, mode, step)
         return replace(spec, width_mm=w, height_mm=h)
 
     def page_size_for(self, i: int) -> tuple[Decimal, Decimal]:
-        info = self.items[i].info
-        if info is None:
-            raise ValueError(self.items[i].error or "La imagen no se pudo leer.")
-        return page_size_mm(info, self.spec, self.mode, self.settings.length_step_mm)
+        return page_size_mm(self.source_info(i), self.spec, self.mode,
+                            self.settings.length_step_mm)
 
     def price_for(self, i: int) -> int | None:
         if self.items[i].info is None:
@@ -240,7 +264,7 @@ class JobController:
             raise ValueError(item.error or "La imagen no se pudo leer.")
         params = params or self.current_params()
         bg = self._resolved_background(item, params.background)
-        return make_plan(item.info, params.spec, params.mode, bg,
+        return make_plan(self.source_info(i), params.spec, params.mode, bg,
                          crop if crop is not None else item.crop, params.length_step_mm)
 
     # --- diagnóstico y aprobación ---------------------------------------------------
@@ -248,7 +272,6 @@ class JobController:
         item = self.items[i]
         if item.info is None:
             raise ValueError(item.error or "La imagen no se pudo leer.")
-        p = self.plan_for(i)
         try:
             proxy = load_proxy(item.path)
         except ImageLoadError as exc:
@@ -256,18 +279,80 @@ class JobController:
             item.error = str(exc)
             log.warning("%s", exc)
             raise
-        diag = analyze_image(item.info, proxy, p.effective_ppi)
+        orig_ppi = make_plan(item.info, self.spec, self.mode, Background(), item.crop,
+                             self.settings.length_step_mm).effective_ppi
+        item.original_diagnosis = analyze_image(item.info, proxy, orig_ppi)
+        item.diagnosis = item.original_diagnosis
         # Los parámetros pudieron cambiar durante el análisis: calificar con los actuales.
-        current = make_plan(item.info, self.spec, self.mode, Background(), item.crop,
-                            self.settings.length_step_mm)
-        diag = rerate(diag, current.effective_ppi)
-        item.diagnosis = diag
+        self._rerate(i)
+        diag = item.diagnosis
         if item.status in (ItemStatus.PENDING, ItemStatus.ANALYZED, ItemStatus.READY,
                            ItemStatus.ERROR):
             item.status = ItemStatus.ANALYZED
             item.status = ItemStatus.READY
             item.error = None
         return diag
+
+    # --- mejora con IA --------------------------------------------------------------
+    def _original_ppi(self, i: int) -> float:
+        item = self.items[i]
+        assert item.info is not None
+        return make_plan(item.info, self.spec, self.mode, Background(), item.crop,
+                         self.settings.length_step_mm).effective_ppi
+
+    def needs_enhancement(self, i: int) -> int:
+        """Pasadas ×4 necesarias (0 = no mejorar)."""
+        item = self.items[i]
+        if item.info is None or item.enhance_choice == EnhanceChoice.OFF or item.uses_enhanced:
+            return 0
+        target = self.settings.enhance_target_ppi
+        ppi = self._original_ppi(i)
+        if item.enhance_choice == EnhanceChoice.ON:
+            return max(1, passes_needed(ppi, target))
+        if not self.settings.enhance_enabled or item.original_diagnosis is None:
+            return 0
+        if classify(ppi) not in _LOW_LEVELS:
+            return 0
+        return passes_needed(ppi, target)
+
+    def set_enhance_choice(self, i: int, choice: EnhanceChoice) -> None:
+        item = self.items[i]
+        if choice != item.enhance_choice:
+            item.enhance_choice = choice
+            self._revoke_approvals([i])
+
+    def enhance(self, i: int, enhancer: Enhancer, cancel: threading.Event | None = None,
+                progress: Callable[[int, int], None] | None = None) -> EnhanceResult:
+        item = self.items[i]
+        if item.info is None:
+            raise ValueError(item.error or "La imagen no se pudo leer.")
+        passes = self.needs_enhancement(i)
+        if passes == 0:
+            raise ValueError("Esta imagen no necesita mejora.")
+        info = item.info
+        item.enhancing = True
+        try:
+            model = choose_model(load_proxy(item.path, 512))
+            result = enhancer.enhance(item.path, info.sha256, passes, model, cancel, progress)
+            einfo = probe(result.path)
+            plan_e = make_plan(einfo, self.spec, self.mode, Background(), item.crop,
+                               self.settings.length_step_mm)
+            # Métricas de contenido (nitidez, ruido, compresión) del original; PPI de la
+            # mejorada. Medir "desenfoque" sobre píxeles interpolados no es informativo.
+            base = item.original_diagnosis or self.analyze(i)
+            item.enhanced_diagnosis = rerate(base, plan_e.effective_ppi)
+            item.enhanced, item.enhanced_info = result, einfo
+            item.error = None
+        except (EnhanceError, ImageLoadError, OSError) as exc:
+            item.error = str(exc)
+            log.warning("Mejora fallida para %s: %s", item.path.name, exc)
+            if isinstance(exc, EnhanceError):
+                raise
+            raise EnhanceError(str(exc)) from exc
+        finally:
+            item.enhancing = False
+        self._revoke_approvals([i])
+        return result
 
     def approve(self, i: int) -> None:
         item = self.items[i]
@@ -322,7 +407,7 @@ class JobController:
                 if own_errors:
                     raise ValueError(own_errors[0].message)
                 out = unique_path(output_path(out_dir, k, item.path, params.naming, today))
-                write_pdf(item.info, self.plan_for(i, params, crop), out,
+                write_pdf(self.source_info(i), self.plan_for(i, params, crop), out,
                           params.export_options)
             except (PdfExportError, ImageLoadError, ValueError, OSError) as exc:
                 item.status = ItemStatus.ERROR

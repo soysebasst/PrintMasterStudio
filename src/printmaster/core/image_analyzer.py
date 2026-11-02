@@ -66,13 +66,13 @@ class Diagnosis:
 
 
 def _resize_long(gray: np.ndarray, side: int = ANALYSIS_SIDE) -> np.ndarray:
+    """Solo reduce: ampliar una imagen pequeña la haría parecer borrosa."""
     h, w = gray.shape[:2]
     scale = side / max(h, w)
-    if abs(scale - 1) < 1e-9:
+    if scale >= 1:
         return gray
-    interp = cv2.INTER_AREA if scale < 1 else cv2.INTER_CUBIC
     return cv2.resize(gray, (max(1, round(w * scale)), max(1, round(h * scale))),
-                      interpolation=interp)
+                      interpolation=cv2.INTER_AREA)
 
 
 def measure_sharpness(gray: np.ndarray) -> float:
