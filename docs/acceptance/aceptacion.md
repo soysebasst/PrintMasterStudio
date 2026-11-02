@@ -92,3 +92,40 @@ git pull
 | ¿Se ve mejor impresa? | |
 | Medida real de la pieza | |
 | Comentarios | |
+
+---
+
+# Fase 2B — Gemini web, interfaz nueva y acceso directo
+
+## 1. Actualizar y crear el acceso directo
+
+```powershell
+cd C:\PrintMaster
+git pull
+.venv\Scripts\pip install -e ".[dev]"
+```
+
+- [ ] Doble clic en **`crear_acceso_directo.bat`**. Debe decir "Acceso directo creado en: …Desktop" y "…Programs".
+- [ ] Abre la app desde el icono **PrintMaster Studio** del Escritorio, sin que aparezca una consola.
+
+## 2. Interfaz
+
+- [ ] Los pasos de arriba (Cargar → Revisar → Exportar) cambian solos.
+- [ ] Abajo, "Siguiente:" te indica qué hacer.
+- [ ] Las tarjetas muestran nombre, tamaño, precio y estado. El clic derecho tiene Quitar, Subir, Bajar y Abrir carpeta.
+- [ ] El panel derecho cabe sin barra de desplazamiento. "Opciones avanzadas" está plegado y recuerda si lo abriste.
+
+## 3. Gemini
+
+- [ ] Selecciona "Respeto" y pulsa **Mejorar en Gemini**. Se abren Gemini y la carpeta, y el prompt queda copiado.
+- [ ] Sube la imagen a Gemini, pega con Ctrl+V y descarga el resultado.
+- [ ] Suelta el archivo en **«Suelta aquí la mejorada»**. Debe quedar en 60 × 110 cm a $17.000, con la insignia **Gemini** y "Mejorada con Gemini (web)…".
+- [ ] Compara con los botones **Original / Mejorada**.
+- [ ] Exporta, imprime a "Tamaño real" y compara con las impresiones anteriores.
+
+| Dato | Valor |
+|---|---|
+| ¿El acceso directo abre sin consola? | |
+| ¿La interfaz es más clara? ¿Qué falta? | |
+| Resultado impreso con Gemini | |
+| Comentarios | |

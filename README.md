@@ -27,6 +27,18 @@ py -3.12 -m venv .venv
 .venv\Scripts\python -m printmaster
 ```
 
+## Abrir con doble clic (acceso directo)
+
+Después de instalar, haz **doble clic en `crear_acceso_directo.bat`** (en la carpeta del proyecto).
+Crea **"PrintMaster Studio"** en el Escritorio y en el menú Inicio. Abre la app sin consola, usando
+`.venv\Scripts\printmaster-studio.exe`.
+
+## Mejorar con Gemini (gratis, por la web)
+
+1. Selecciona la imagen y pulsa **«Mejorar en Gemini»**: se copia el prompt, se abre Gemini y la carpeta de la imagen.
+2. En Gemini: sube la imagen, pega el prompt (Ctrl+V) y descarga el resultado.
+3. Suelta el archivo descargado en **«Suelta aquí la mejorada»**. La app conserva el largo y el precio del original y termina de ampliar la imagen en el PC si hace falta.
+
 ## Desarrollo y pruebas
 
 ```powershell

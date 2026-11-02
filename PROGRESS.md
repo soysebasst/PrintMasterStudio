@@ -17,6 +17,12 @@
 - Mejora local con Real-ESRGAN (instalador verificado, respaldo básico sin IA, caché, antes/después)
 - Checklist: `docs/acceptance/aceptacion.md` (sección Fase 2A)
 
+## Fase 2B — implementada (pendiente de validación en Windows)
+- Mejora con Gemini por la web (gratis): copiar prompt, abrir Gemini, soltar el resultado
+- Interfaz rediseñada: tarjetas, pasos, «Siguiente:», panel corto con opciones avanzadas plegadas
+- Acceso directo con doble clic (`crear_acceso_directo.bat`), sin consola
+- Gemini por API: interfaz preparada, sin activar (requiere facturación)
+
 ## Siguiente
 - Fase 2: procesamiento por lotes en segundo plano con pool de procesos, pausa/reanudar/cancelar,
   persistencia en SQLite, historial y regeneración, registro de errores visible
