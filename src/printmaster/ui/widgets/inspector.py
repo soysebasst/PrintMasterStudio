@@ -33,7 +33,7 @@ from printmaster.domain.models import (
     PrintSpec,
 )
 from printmaster.domain.units import Unit, from_mm, to_mm
-from printmaster.infra.settings import FavoriteFormat, Settings, save_settings
+from printmaster.infra.settings import FavoriteFormat, Settings, load_settings, save_settings
 from printmaster.printers.profiles import ValidationIssue
 
 PPI_PRESETS = [100, 150, 200, 250, 300]
@@ -89,11 +89,13 @@ class Inspector(QWidget):
             return lbl
 
         # --- Tamaño -------------------------------------------------------------------
-        lay.addWidget(section("Tamaño"))
+        title_row = QHBoxLayout()
+        title_row.addWidget(section("Tamaño"))
         self.favorites_combo = QComboBox()
         self.favorites_combo.setObjectName("favorites_combo")
         self.favorites_combo.setToolTip("Formatos favoritos")
-        lay.addWidget(self.favorites_combo)
+        title_row.addWidget(self.favorites_combo, 1)
+        lay.addLayout(title_row)
         size_row = QHBoxLayout()
         self.width_spin = QDoubleSpinBox()
         self.width_spin.setObjectName("width_spin")
@@ -127,7 +129,6 @@ class Inspector(QWidget):
         lay.addWidget(self.issues_label)
 
         # --- Ajuste -------------------------------------------------------------------
-        lay.addSpacing(6)
         lay.addWidget(section("Ajuste"))
         self.mode_combo = QComboBox()  # modelo interno; se maneja con los botones
         self.mode_combo.setObjectName("mode_combo")
@@ -177,7 +178,10 @@ class Inspector(QWidget):
         self.advanced_toggle.setObjectName("linkButton")
         self.advanced_toggle.setCheckable(True)
         self.advanced_toggle.clicked.connect(self._toggle_advanced)
-        lay.addWidget(self.advanced_toggle)
+        self.toggles_row = QHBoxLayout()
+        self.toggles_row.addStretch(1)
+        self.toggles_row.addWidget(self.advanced_toggle)
+        lay.addLayout(self.toggles_row)
         self.advanced_box = QWidget()
         adv = QFormLayout(self.advanced_box)
         adv.setContentsMargins(0, 0, 0, 0)
@@ -318,7 +322,9 @@ class Inspector(QWidget):
         self.advanced_box.setVisible(open_)
         if save and getattr(self._settings, "advanced_open", None) != open_:
             self._settings.advanced_open = open_
-            save_settings(self._settings)
+            disk = load_settings()  # solo este campo: no pisar lo guardado en Configuración
+            disk.advanced_open = open_
+            save_settings(disk)
 
     def _toggle_advanced(self) -> None:
         self._set_advanced(self.advanced_toggle.isChecked())

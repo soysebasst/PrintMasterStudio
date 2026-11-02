@@ -34,12 +34,13 @@ class DropZone(QLabel):
     file_dropped = Signal(object)  # Path
 
     def __init__(self, parent=None) -> None:
-        super().__init__("Suelta aquí la mejorada\no haz clic para elegirla", parent)
+        super().__init__("Suelta aquí la mejorada (o clic para elegir)", parent)
         self.setObjectName("dropZone")
         self.setAlignment(Qt.AlignCenter)
         self.setAcceptDrops(True)
         self.setCursor(Qt.PointingHandCursor)
-        self.setMinimumHeight(44)
+        self.setMinimumHeight(34)
+        self.setWordWrap(True)
 
     def dragEnterEvent(self, event) -> None:  # noqa: N802
         if event.mimeData().hasUrls():

@@ -71,6 +71,8 @@ class JobPage(QWidget):
         self._cancel_enhance = threading.Event()
         self._show_original = False
         self._gemini_hint: str | None = None
+        self._attaching: JobItem | None = None
+        self._attach_cancel = threading.Event()
         self._exporting = False
         self._pending_settings: Settings | None = None
         self._bridge = _ProgressBridge()
@@ -146,6 +148,7 @@ class JobPage(QWidget):
         self.inspector.layout().insertWidget(self.inspector.quality_insert_index(), self.quality)
         self.quality.choice_row.addWidget(self.inspector.enhance_combo, 1)
         self.quality.choice_row.setSpacing(6)
+        self.inspector.toggles_row.insertWidget(0, self.quality.details_toggle)
         side_lay.addWidget(self.inspector)
         self.side_panel = side
         scroll = QScrollArea()
@@ -234,6 +237,7 @@ class JobPage(QWidget):
             self._pending_settings = settings
             return
         self.settings = settings
+        self.inspector._settings = settings
         self.controller.settings = settings
         self.controller.naming = type(self.controller.naming)(
             prefix=settings.naming_prefix, digits=settings.naming_digits,
@@ -296,7 +300,9 @@ class JobPage(QWidget):
         n_export = len(self.controller.exportable_indices()) if items else 0
         self.export_btn.setText(f"Exportar {n_export} PDF" if n_export else "Exportar PDF")
         self.export_btn.setEnabled(exportable and not busy and not enhancing)
-        self.progress.setVisible(busy)
+        self.progress.setVisible(busy or enhancing)
+        if not busy:
+            self.progress.setRange(0, 0 if enhancing else 100)
         self.cancel_enhance_btn.setVisible(enhancing)
         count, total = self.controller.total_price()
         self.total_label.setText(
@@ -311,7 +317,8 @@ class JobPage(QWidget):
             b.setEnabled(has_enh)
         if not has_enh:
             self._show_original = False
-        (self.original_btn if self._show_original else self.enhanced_btn).setChecked(True)
+        showing_original = self._show_original or not has_enh
+        (self.original_btn if showing_original else self.enhanced_btn).setChecked(True)
         if cur >= 0 and items[cur].info is not None and not self.controller.has_errors(cur):
             w, h = (f"{(v / 10).normalize():f}".replace(".", ",")
                     for v in self.controller.page_size_for(cur))
@@ -326,6 +333,7 @@ class JobPage(QWidget):
             self.inspector.set_price(None)
 
     def _after_queue_change(self) -> None:
+        self._gemini_hint = None
         self._update_state()
         self._on_current_changed(self._current_index())
 
@@ -403,6 +411,7 @@ class JobPage(QWidget):
             self._update_state()
             return
         self._show_original = False
+        self._gemini_hint = None
         self.inspector.set_enhance_choice(self.controller.items[row].enhance_choice)
         self._show_diagnosis(row)
         self._redraw_current()
@@ -494,14 +503,16 @@ class JobPage(QWidget):
         approved = [it for it in self.controller.items
                     if it.uses_enhanced and it.enhanced is not None
                     and it.status == ItemStatus.APPROVED]
+        gemini = sum(1 for it in approved if it.enhanced.engine.startswith("Gemini"))
         ai = sum(1 for it in approved if it.enhanced.engine == ENGINE_AI)
-        basic = len(approved) - ai
+        basic = len(approved) - ai - gemini
+        compare = "revíselas con «Original» y «Mejorada»."
+        if gemini:
+            messages.append(f"Se mejoraron {gemini} imágenes con Gemini: {compare}")
         if ai:
-            messages.append(f"Se mejoraron {ai} imágenes con IA: revíselas con "
-                            "«Ver original / Ver mejorada».")
+            messages.append(f"Se mejoraron {ai} imágenes con IA (Real-ESRGAN): {compare}")
         if basic:
-            messages.append(f"Se mejoraron {basic} imágenes con la mejora básica (sin IA): "
-                            "revíselas con «Ver original / Ver mejorada».")
+            messages.append(f"Se mejoraron {basic} imágenes con la mejora básica: {compare}")
         if messages:
             self._info("Aprobación", "\n\n".join(messages))
 
@@ -509,6 +520,7 @@ class JobPage(QWidget):
         if self._exporting:
             return
         self._exporting = True
+        self.progress.setRange(0, 100)
         self.progress.setValue(0)
         self._set_inputs_enabled(False)
         self._update_state()
@@ -616,6 +628,8 @@ class JobPage(QWidget):
         self._enhance_finished(item)
 
     def _cancel_enhancements(self) -> None:
+        if self._attaching is not None:
+            self._attach_cancel.set()
         self._skip_enhance.extend(self._enhance_queue)
         if self._enhancing is not None:
             self._skip_enhance.append(self._enhancing)
@@ -674,6 +688,12 @@ class JobPage(QWidget):
         if i < 0 or self._exporting:
             return
         item = self.controller.items[i]
+        if self._enhancing is item:
+            self._cancel_enhance.set()  # la versión de Gemini reemplaza la mejora automática
+        self._enhance_queue = [it for it in self._enhance_queue if it is not item]
+        self._skip_enhance.append(item)
+        self._attaching = item
+        self._attach_cancel = threading.Event()
         item.enhancing = True
         self.model.refresh(i)
         self._show_diagnosis(i)
@@ -687,12 +707,15 @@ class JobPage(QWidget):
             row = self._row_of(item)
             if row < 0:
                 return None
-            return self.controller.attach_external(row, path, self.enhancer)
+            return self.controller.attach_external(row, path, self.enhancer,
+                                                   cancel=self._attach_cancel)
         finally:
             item.enhancing = False
 
     def _attach_done(self, item: JobItem, res) -> None:
         item.enhancing = False
+        self._attaching = None
+        self.inspector.set_enhance_choice(item.enhance_choice)
         self._gemini_hint = None
         self._show_original = False
         row = self._row_of(item)
@@ -709,6 +732,7 @@ class JobPage(QWidget):
 
     def _attach_failed(self, item: JobItem, message: str) -> None:
         item.enhancing = False
+        self._attaching = None
         row = self._row_of(item)
         if row >= 0:
             self.model.refresh(row)

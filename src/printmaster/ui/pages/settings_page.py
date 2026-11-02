@@ -29,7 +29,7 @@ from printmaster.core.enhance.installer import find_engine, install_engine
 from printmaster.core.enhance.realesrgan import RealEsrgan
 from printmaster.domain.units import Unit
 from printmaster.infra import paths
-from printmaster.infra.settings import Settings, save_settings
+from printmaster.infra.settings import Settings, load_settings, save_settings
 from printmaster.ui.workers import run_async
 
 
@@ -255,6 +255,7 @@ class SettingsPage(QWidget):
         s.enhance_enabled = self.enhance_check.isChecked()
         s.enhance_target_ppi = self.target_ppi_spin.value()
         s.gemini_prompt = self.gemini_prompt_edit.toPlainText().strip() or DEFAULT_PROMPT
+        s.advanced_open = load_settings().advanced_open  # lo maneja el panel de trabajo
         save_settings(s)
         self.status_label.setText("Configuración guardada.")
         self.settings_changed.emit(s.model_copy(deep=True))

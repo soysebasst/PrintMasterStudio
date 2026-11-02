@@ -16,6 +16,7 @@ from pathlib import Path
 
 from printmaster.core.color import edge_color, flatten_alpha
 from printmaster.core.enhance.enhancer import (
+    EnhanceCancelled,
     EnhanceError,
     Enhancer,
     EnhanceResult,
@@ -74,6 +75,7 @@ class JobItem:
     enhanced: EnhanceResult | None = None
     enhanced_info: ImageInfo | None = None
     enhancing: bool = False
+    enhance_gen: int = 0  # sube con cada mejora externa: una mejora local vieja no la pisa
     original_diagnosis: Diagnosis | None = None
     enhanced_diagnosis: Diagnosis | None = None
 
@@ -359,6 +361,7 @@ class JobController:
         if passes == 0:
             raise ValueError("Esta imagen no necesita mejora.")
         info = item.info
+        gen = item.enhance_gen
         item.enhancing = True
         result: EnhanceResult | None = None
         try:
@@ -367,9 +370,14 @@ class JobController:
             einfo = probe(result.path)
             plan_e = make_plan(einfo, self.spec, self.mode, Background(), item.crop,
                                self.settings.length_step_mm, (info.width_px, info.height_px))
+            if item.enhance_gen != gen:
+                # Mientras tanto se adjuntó una mejora externa (Gemini): no se sobrescribe.
+                return item.enhanced  # type: ignore[return-value]
             # Métricas de contenido (nitidez, ruido, compresión) del original; PPI de la
             # mejorada. Medir "desenfoque" sobre píxeles interpolados no es informativo.
-            base = item.original_diagnosis or self.analyze(i)
+            base = item.original_diagnosis or item.diagnosis
+            if base is None:
+                base = self.analyze(next(k for k, it in enumerate(self.items) if it is item))
             item.enhanced_diagnosis = rerate(base, plan_e.effective_ppi)
             item.enhanced, item.enhanced_info = result, einfo
             item.error = None
@@ -391,8 +399,8 @@ class JobController:
             self._revoke_approvals([idx])
         return result
 
-    def attach_external(self, i: int, path: Path,
-                        enhancer: Enhancer | None = None) -> AttachResult:
+    def attach_external(self, i: int, path: Path, enhancer: Enhancer | None = None,
+                        cancel: threading.Event | None = None) -> AttachResult:
         """Usa como versión mejorada una imagen externa (p. ej. descargada de Gemini web).
 
         El archivo soltado no se modifica: se copia como PNG a la caché. El largo y el precio
@@ -424,15 +432,23 @@ class JobController:
         final_info = ext_info
         ppi = ppi_of(ext_info)
         target = self.settings.enhance_target_ppi
+        item.enhance_gen += 1  # cualquier mejora local en curso queda descartada
         if ppi < target and enhancer is not None:
             passes = passes_needed(ppi, target)
             model = choose_model(load_proxy(copy, 512))
-            local = enhancer.enhance(copy, ext_info.sha256, passes, model)
-            final_info = probe(local.path)
-            result = EnhanceResult(local.path, model, passes, f"{ENGINE_GEMINI} + {local.engine}")
-            ppi = ppi_of(final_info)
+            try:
+                local = enhancer.enhance(copy, ext_info.sha256, passes, model, cancel)
+            except EnhanceCancelled:
+                local = None  # se usa la de Gemini sin el pase local
+            if local is not None:
+                final_info = probe(local.path)
+                result = EnhanceResult(local.path, model, passes,
+                                       f"{ENGINE_GEMINI} + {local.engine}")
+                ppi = ppi_of(final_info)
         if item.original_diagnosis is None:
-            self.analyze(i)
+            idx_now = next((k for k, it in enumerate(self.items) if it is item), None)
+            if idx_now is not None:
+                self.analyze(idx_now)
         base = item.original_diagnosis or item.diagnosis
         item.enhanced, item.enhanced_info = result, final_info
         if base is not None:

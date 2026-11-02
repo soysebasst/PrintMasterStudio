@@ -21,11 +21,14 @@ def aspect_mismatch(a: tuple[int, int], b: tuple[int, int], tol: float = ASPECT_
     return abs(ra - rb) / ra > tol
 
 
-def reveal_command(path: Path) -> list[str]:
-    """Comando para mostrar el archivo en el explorador del sistema."""
-    path = Path(path)
+def reveal_command(path) -> list[str] | str:
+    """Comando para mostrar el archivo en el explorador del sistema.
+
+    En Windows se devuelve una sola cadena: explorer.exe no entiende el argumento
+    `/select,` si viene entre comillas completas (pasa con rutas con espacios)."""
     if sys.platform == "win32":
-        return ["explorer", f"/select,{path}"]
+        return f'explorer /select,"{path}"'
+    path = Path(path)
     if sys.platform == "darwin":
         return ["open", "-R", str(path)]
     return ["xdg-open", str(path.parent)]
