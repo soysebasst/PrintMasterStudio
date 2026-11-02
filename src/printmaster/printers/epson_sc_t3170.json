@@ -1,0 +1,10 @@
+{
+  "id": "epson_sc_t3170",
+  "name": "Epson SureColor SC-T3170",
+  "roll_min_mm": 329,
+  "roll_max_mm": 610,
+  "sheet_min_mm": 210,
+  "sheet_max_mm": 610,
+  "side_margin_mm": 3,
+  "max_length_mm": 5080
+}
