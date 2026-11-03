@@ -35,14 +35,14 @@ THUMB_H = 104
 
 STATUS_COLORS = {  # (fondo, texto)
     "Error": ("#3d1f22", "#ff8a8a"),
-    "PDF listo": ("#1d2f4a", "#8ab4ff"),
+    "PDF listo": ("#2d2547", "#b9a6ff"),
     "Aprobada": ("#1b3326", "#7ee787"),
     "Mejorando…": ("#2e2440", "#c9a7ff"),
     "Mejorar": ("#3a3018", "#f0c15a"),
     "Lista": ("#1b3326", "#7ee787"),
-    "Analizando…": ("#2a2c31", "#a8adb5"),
+    "Analizando…": ("#252134", "#a29cb8"),
 }
-ORIGIN_COLORS = {"IA": "#7c4dcc", "Gemini": "#1f6feb", "Básica": "#5a5f68"}
+ORIGIN_COLORS = {"IA": "#7c4dcc", "Gemini": "#7c5cff", "Básica": "#5a5f68"}
 
 
 class CardDelegate(QStyledItemDelegate):
@@ -54,13 +54,13 @@ class CardDelegate(QStyledItemDelegate):
         painter.setRenderHint(QPainter.Antialiasing)
         r = option.rect.adjusted(4, 4, -4, -4)
         selected = bool(option.state & QStyle.State_Selected)
-        painter.setPen(QPen(QColor("#3d8bfd" if selected else "#2c2e33"), 2 if selected else 1))
-        painter.setBrush(QColor("#24262b" if selected else "#1d1f23"))
-        painter.drawRoundedRect(r, 10, 10)
+        painter.setPen(QPen(QColor("#7c5cff" if selected else "#2e2a3d"), 2 if selected else 1))
+        painter.setBrush(QColor("#252134" if selected else "#1d1a27"))
+        painter.drawRoundedRect(r, 12, 12)
 
         thumb_rect = QRect(r.left() + 8, r.top() + 8, r.width() - 16, THUMB_H)
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor("#141517"))
+        painter.setBrush(QColor("#110f17"))
         painter.drawRoundedRect(thumb_rect, 6, 6)
         icon = index.data(Qt.DecorationRole)
         if icon is not None:
@@ -84,11 +84,11 @@ class CardDelegate(QStyledItemDelegate):
         f = QFont(option.font)
         painter.setFont(f)
         fm = painter.fontMetrics()
-        painter.setPen(QColor("#e6e6e6"))
+        painter.setPen(QColor("#ece9f5"))
         painter.drawText(QRect(r.left() + 8, y, r.width() - 16, fm.height()), Qt.AlignLeft,
                          fm.elidedText(name, Qt.ElideMiddle, r.width() - 16))
         y += fm.height() + 2
-        painter.setPen(QColor("#a8adb5"))
+        painter.setPen(QColor("#a29cb8"))
         size_price = index.data(SizePriceRole) or ""
         painter.drawText(QRect(r.left() + 8, y, r.width() - 16, fm.height()), Qt.AlignLeft,
                          fm.elidedText(size_price, Qt.ElideRight, r.width() - 16))

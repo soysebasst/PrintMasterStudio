@@ -37,7 +37,7 @@ packages = ["src/printmaster"]
 
 [tool.hatch.build]
 include = ["src/printmaster/**/*.py", "src/printmaster/**/*.json", "src/printmaster/**/*.qss",
-           "src/printmaster/**/*.ico", "src/printmaster/**/*.png"]
+           "src/printmaster/**/*.ico", "src/printmaster/**/*.png", "src/printmaster/**/*.svg"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

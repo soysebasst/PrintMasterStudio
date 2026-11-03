@@ -13,6 +13,7 @@ from printmaster.core.image_analyzer import Diagnosis
 from printmaster.core.image_loader import SUPPORTED_EXTENSIONS
 from printmaster.domain.models import ImageInfo
 from printmaster.domain.quality import QualityLevel
+from printmaster.ui.icons import icon
 from printmaster.ui.widgets.diagnosis_card import DiagnosisCard
 
 SHORT = {
@@ -25,6 +26,17 @@ CHIP_STYLE = {  # fondo, texto
     QualityLevel.ACEPTABLE: ("#3a3018", "#f0c15a"), QualityLevel.BAJA: ("#3d2a18", "#ffab70"),
     QualityLevel.MUY_BAJA: ("#3d1f22", "#ff8a8a"),
 }
+WAIT_NAME_CHARS = 26
+
+
+def _short(name: str | None) -> str:
+    """Acorta nombres largos por el medio para que no ensanchen el panel."""
+    if name is None or len(name) <= WAIT_NAME_CHARS:
+        return name or ""
+    half = (WAIT_NAME_CHARS - 1) // 2
+    return f"{name[:half]}…{name[-half:]}"
+
+
 GEMINI_NOTE = "Gemini redibuja la imagen: revise textos, logos y caras antes de aprobar."
 
 
@@ -34,7 +46,7 @@ class DropZone(QLabel):
     file_dropped = Signal(object)  # Path
 
     def __init__(self, parent=None) -> None:
-        super().__init__("Suelta aquí la mejorada (o clic para elegir)", parent)
+        super().__init__("o arrastre aquí la descargada (clic para elegir)", parent)
         self.setObjectName("dropZone")
         self.setAlignment(Qt.AlignCenter)
         self.setAcceptDrops(True)
@@ -83,9 +95,29 @@ class QualityPanel(QWidget):
         self.status_label.setWordWrap(True)
         self.status_label.setTextFormat(Qt.RichText)
         lay.addWidget(self.status_label)
-        self.gemini_btn = QPushButton("✦  Mejorar en Gemini")
-        self.gemini_btn.setToolTip("Copia el prompt, abre Gemini y la carpeta de la imagen")
+        self.gemini_btn = QPushButton("  Mejorar en Gemini")
+        self.gemini_btn.setProperty("primary", True)
+        self.gemini_btn.setIcon(icon("sparkles", "#ffffff", 18))
+        self.gemini_btn.setToolTip("Copia la imagen al portapapeles para pegarla en Gemini")
         lay.addWidget(self.gemini_btn)
+        self.wait_label = QLabel("")
+        self.wait_label.setWordWrap(True)
+        self.wait_label.setObjectName("muted")
+        lay.addWidget(self.wait_label)
+        wait_row = QHBoxLayout()
+        wait_row.addStretch(1)
+        self.copy_prompt_btn = QPushButton("Copiar prompt")
+        self.copy_prompt_btn.setObjectName("linkButton")
+        wait_row.addWidget(self.copy_prompt_btn)
+        self.stop_wait_btn = QPushButton("Dejar de esperar")
+        self.stop_wait_btn.setObjectName("linkButton")
+        wait_row.addWidget(self.stop_wait_btn)
+        lay.addLayout(wait_row)
+        self.set_waiting(None)
+        self.paste_btn = QPushButton("  Pegar mejorada (Ctrl+V)")
+        self.paste_btn.setIcon(icon("clipboard", size=18))
+        self.paste_btn.setToolTip("Pega la imagen copiada en Gemini (clic derecho › Copiar imagen)")
+        lay.addWidget(self.paste_btn)
         self.drop_zone = DropZone()
         lay.addWidget(self.drop_zone)
         self.note_label = QLabel(GEMINI_NOTE)
@@ -104,6 +136,15 @@ class QualityPanel(QWidget):
         self.details = DiagnosisCard()
         self.details.setVisible(False)
         lay.addWidget(self.details)
+
+    def set_waiting(self, name: str | None, *, show_copy_prompt: bool = False) -> None:
+        """Muestra u oculta el estado «Esperando descarga de Gemini…»."""
+        waiting = name is not None
+        self.wait_label.setText(
+            f"Esperando descarga de Gemini para «{_short(name)}»…" if waiting else "")
+        self.wait_label.setVisible(waiting)
+        self.stop_wait_btn.setVisible(waiting)
+        self.copy_prompt_btn.setVisible(waiting and show_copy_prompt)
 
     def _toggle_details(self) -> None:
         open_ = self.details_toggle.isChecked()

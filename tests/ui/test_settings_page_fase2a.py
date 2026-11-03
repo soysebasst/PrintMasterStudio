@@ -46,3 +46,29 @@ def test_gemini_prompt_saved(page, qtbot):
     assert load_settings().gemini_prompt == "Mejora esta imagen."
     qtbot.mouseClick(page.reset_prompt_btn, Qt.LeftButton)
     assert "letra por letra" in page.gemini_prompt_edit.toPlainText()
+
+
+def test_save_gemini_options(page, qtbot, tmp_path):
+    assert page.gemini_open_combo.currentData() == "desktop"
+    page.gemini_open_combo.setCurrentIndex(page.gemini_open_combo.findData("web"))
+    page.gemini_url_edit.setText("  https://gemini.google.com/gem/abc  ")
+    page.downloads_edit.setText(str(tmp_path / "bajadas"))
+    qtbot.mouseClick(page.save_btn, Qt.LeftButton)
+    s = load_settings()
+    assert s.gemini_open_mode == "web"
+    assert s.gemini_url == "https://gemini.google.com/gem/abc"
+    assert s.downloads_dir == tmp_path / "bajadas"
+
+
+def test_empty_gemini_url_restores_default(page, qtbot):
+    from printmaster.core.enhance.gemini_web import GEMINI_URL
+    page.gemini_url_edit.setText("   ")
+    qtbot.mouseClick(page.save_btn, Qt.LeftButton)
+    assert load_settings().gemini_url == GEMINI_URL
+
+
+def test_copy_instructions(page, qtbot):
+    from PySide6.QtGui import QGuiApplication
+    page.gemini_prompt_edit.setPlainText("Mejora esto")
+    qtbot.mouseClick(page.copy_instructions_btn, Qt.LeftButton)
+    assert QGuiApplication.clipboard().text() == "Mejora esto"
