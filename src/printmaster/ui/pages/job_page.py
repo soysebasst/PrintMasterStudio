@@ -56,6 +56,7 @@ from printmaster.ui.workers import run_async
 
 PREVIEW_SIDE = 1600
 CLIPBOARD_SIDE = 3072  # lado mayor máximo de la imagen que se copia para Gemini
+CLIPBOARD_PREVIEW_SIDE = 1100  # «Copiar imagen» de Gemini entrega ~1024 px de lado mayor
 WAIT_TIMEOUT_S = 900  # 15 minutos esperando la descarga de Gemini
 WATCH_INTERVAL_MS = 1000
 MSG_COPIED = ("Imagen copiada. En Gemini: Ctrl+V y enviar. Luego descargue el resultado o "
@@ -101,6 +102,7 @@ class JobPage(QWidget):
         self._watch: DownloadWatch | None = None
         self._consumed: set[Path] = set()
         self._copied_digest: tuple[int, int, str] | None = None
+        self._copying: JobItem | None = None  # imagen que se está preparando para Gemini
         self._watch_timer = QTimer(self)
         self._watch_timer.setInterval(WATCH_INTERVAL_MS)
         self._watch_timer.timeout.connect(self._poll_downloads)
@@ -378,10 +380,14 @@ class JobPage(QWidget):
             self.info_label.setText(f"{w} × {h} cm" + (f" · {ppi:.0f} PPI efectivos"
                                                         if ppi else "")
                                     + ("" if items[cur].region.is_full else " · Recortada"))
-            self.inspector.set_price(self.controller.price_for(cur))
+            price = self.controller.price_for(cur)
+            self.inspector.set_price(price)
+            self.quality.set_price(format_cop(price) if price is not None else None,
+                                   f"Lámina de {w} × {h} cm")
         else:
             self.info_label.setText("")
             self.inspector.set_price(None)
+            self.quality.set_price(None)
 
     def _after_queue_change(self) -> None:
         self._gemini_hint = None
@@ -788,14 +794,31 @@ class JobPage(QWidget):
 
     def _on_gemini(self) -> None:
         i = self._current_index()
-        if i < 0 or self._exporting:
+        if i < 0 or self._exporting or self._copying is not None:
             return
         item = self.controller.items[i]
-        try:
-            qimg = pil_to_qimage(load_proxy(item.path, max_side=CLIPBOARD_SIDE))
-        except Exception as exc:  # noqa: BLE001
-            self._info("Mejora con Gemini", f"No se pudo copiar la imagen: {exc}")
+        self._copying = item
+        self.quality.gemini_btn.setEnabled(False)
+        self.quality.gemini_btn.setText("  Copiando imagen…")
+        # PNG/TIFF grandes tardan en decodificarse: fuera del hilo de la interfaz
+        run_async(load_proxy, item.path, CLIPBOARD_SIDE,
+                  on_done=lambda img, it=item: self._gemini_ready(it, img),
+                  on_failed=lambda msg, it=item: self._gemini_copy_failed(it, msg), owner=self)
+
+    def _end_copy(self) -> None:
+        self._copying = None
+        self.quality.gemini_btn.setText("  Mejorar en Gemini")
+        self.quality.gemini_btn.setEnabled(self._current_index() >= 0)
+
+    def _gemini_copy_failed(self, item: JobItem, message: str) -> None:
+        self._end_copy()
+        self._info("Mejora con Gemini", f"No se pudo copiar la imagen: {message}")
+
+    def _gemini_ready(self, item: JobItem, img) -> None:
+        self._end_copy()
+        if self._row_of(item) < 0:
             return
+        qimg = pil_to_qimage(img)
         QGuiApplication.clipboard().setImage(qimg)
         self._copied_digest = self._digest(qimg)
         if self.settings.gemini_open_mode == "web":
@@ -908,10 +931,11 @@ class JobPage(QWidget):
             self._info("Mejora con Gemini", MSG_NO_IMAGE)
             return
         self._on_external_dropped(path, target=target,
-                                  notice=f"Mejora pegada en «{target.path.name}»")
+                                  notice=f"Mejora pegada en «{target.path.name}»",
+                                  from_clipboard=mime.hasImage())
 
     def _on_external_dropped(self, path: Path, target: JobItem | None = None,
-                             notice: str | None = None) -> None:
+                             notice: str | None = None, from_clipboard: bool = False) -> None:
         if self._exporting:
             return
         if target is None:
@@ -943,7 +967,8 @@ class JobPage(QWidget):
             self._show_diagnosis(i)
         self._update_state()
         run_async(self._attach, item, Path(path), cancel,
-                  on_done=lambda res, it=item: self._attach_done(it, res, notice),
+                  on_done=lambda res, it=item: self._attach_done(it, res, notice,
+                                                                 from_clipboard),
                   on_failed=lambda msg, it=item: self._attach_failed(it, msg), owner=self)
 
     def _attach(self, item: JobItem, path: Path, cancel: threading.Event | None = None):
@@ -963,7 +988,8 @@ class JobPage(QWidget):
         if self._attaching is item:
             self._attaching = None
 
-    def _attach_done(self, item: JobItem, res, notice: str | None = None) -> None:
+    def _attach_done(self, item: JobItem, res, notice: str | None = None,
+                     from_clipboard: bool = False) -> None:
         self._attach_finished(item)
         self._gemini_hint = notice if res is not None else None
         self._show_original = False
@@ -975,10 +1001,31 @@ class JobPage(QWidget):
                 self._show_diagnosis(row)
                 self._redraw_current()
         self._update_state()
+        warnings = []
         if res is not None and res.aspect_warning:
-            self._info("Mejora con Gemini",
-                       "La imagen mejorada tiene otra proporción (Gemini la recortó o "
-                       "extendió). Se ajustará sin deformarla.")
+            warnings.append("La imagen mejorada tiene otra proporción (Gemini la recortó o "
+                            "extendió). Se ajustará sin deformarla.")
+        small = self._small_result_warning(item, from_clipboard) if res is not None else None
+        if small:
+            warnings.append(small)
+        if warnings:
+            self._info("Mejora con Gemini", "\n\n".join(warnings))
+
+    @staticmethod
+    def _small_result_warning(item: JobItem, from_clipboard: bool) -> str | None:
+        orig, enh = item.info, item.enhanced_info
+        if orig is None or enh is None:
+            return None
+        o_long, e_long = max(orig.width_px, orig.height_px), max(enh.width_px, enh.height_px)
+        size = f"{enh.width_px}×{enh.height_px} px"
+        if e_long < o_long:
+            return (f"La imagen de Gemini llegó más pequeña que la original ({size} contra "
+                    f"{orig.width_px}×{orig.height_px} px). Descargue el resultado desde Gemini "
+                    "(botón de descarga) para tener la resolución completa.")
+        if from_clipboard and e_long <= CLIPBOARD_PREVIEW_SIDE:
+            return (f"Gemini entrega una copia reducida al usar «Copiar imagen» ({size}). "
+                    "Para la resolución completa, descargue el resultado: la app lo toma sola.")
+        return None
 
     def _attach_failed(self, item: JobItem, message: str) -> None:
         self._attach_finished(item)
