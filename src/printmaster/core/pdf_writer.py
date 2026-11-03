@@ -118,7 +118,11 @@ def _content(plan: RenderPlan, rect) -> bytes:
         parts.append(f"q {_num(r)} {_num(g)} {_num(b)} rg 0 0 "
                      f"{_num(plan.page_w_pt)} {_num(plan.page_h_pt)} re f Q")
     x, y, w, h = rect
-    parts.append(f"q {_num(w)} 0 0 {_num(h)} {_num(x)} {_num(y)} cm /Im0 Do Q")
+    clip = ""
+    if tuple(rect) != tuple(plan.dest_rect_pt):  # imagen entera sin recomprimir: recortar
+        cx, cy, cw, ch = plan.dest_rect_pt
+        clip = f"{_num(cx)} {_num(cy)} {_num(cw)} {_num(ch)} re W n "
+    parts.append(f"q {clip}{_num(w)} 0 0 {_num(h)} {_num(x)} {_num(y)} cm /Im0 Do Q")
     return "\n".join(parts).encode("ascii")
 
 

@@ -13,6 +13,7 @@ from printmaster.domain.models import (
     Background,
     BackgroundKind,
     CropOffset,
+    CropRect,
     FitMode,
     ImageInfo,
     Orientation,
@@ -35,21 +36,32 @@ def auto_length_mm(width_mm: Decimal, img_w: int, img_h: int, step_mm: int = 50)
     return Decimal(max(1, steps) * step_mm)
 
 
+def _region_dims(w: float, h: float, region: CropRect) -> tuple[float, float]:
+    return w * (region.x1 - region.x0), h * (region.y1 - region.y0)
+
+
 def _resolved_spec(info: ImageInfo, spec: PrintSpec, mode: FitMode,
-                   length_step_mm: int, aspect_px: tuple[int, int] | None = None) -> PrintSpec:
+                   length_step_mm: int, aspect_px: tuple[int, int] | None = None,
+                   region: CropRect = CropRect()) -> PrintSpec:
     if mode == FitMode.FIT_LENGTH:
         aw, ah = aspect_px or (info.width_px, info.height_px)
-        length = auto_length_mm(spec.width_mm, aw, ah, length_step_mm)
+        rw, rh = _region_dims(aw, ah, region)
+        exact = Decimal(spec.width_mm) * Decimal(repr(rh)) / Decimal(repr(rw))
+        steps = math.ceil(float(exact / Decimal(length_step_mm)) - 1e-9)
+        length = Decimal(max(1, steps) * length_step_mm)
         return PrintSpec(spec.width_mm, length, spec.ppi, Orientation.AS_ENTERED)
-    return spec.resolved_for(info.width_px, info.height_px)
+    rw, rh = _region_dims(info.width_px, info.height_px, region)
+    return spec.resolved_for(max(1, round(rw)), max(1, round(rh)))
 
 
 def page_size_mm(info: ImageInfo, spec: PrintSpec, mode: FitMode,
                  length_step_mm: int = 50,
-                 aspect_px: tuple[int, int] | None = None) -> tuple[Decimal, Decimal]:
+                 aspect_px: tuple[int, int] | None = None,
+                 region: CropRect = CropRect()) -> tuple[Decimal, Decimal]:
     """aspect_px: proporción para el largo automático (la del original, aunque se imprima la
-    versión mejorada, cuyo redondeo de píxeles podría cambiar el largo)."""
-    s = _resolved_spec(info, spec, mode, length_step_mm, aspect_px)
+    versión mejorada, cuyo redondeo de píxeles podría cambiar el largo). region: recorte
+    manual, en fracciones de la imagen."""
+    s = _resolved_spec(info, spec, mode, length_step_mm, aspect_px, region)
     return s.width_mm, s.height_mm
 
 
@@ -61,11 +73,13 @@ def plan(
     crop: CropOffset = CropOffset(),
     length_step_mm: int = 50,
     aspect_px: tuple[int, int] | None = None,
+    region: CropRect = CropRect(),
 ) -> RenderPlan:
     if background.kind == BackgroundKind.EDGE_COLOR:
         raise ValueError("El color de borde debe resolverse antes de planificar.")
-    W, H = info.width_px, info.height_px
-    s = _resolved_spec(info, spec, mode, length_step_mm, aspect_px)
+    rl, rt, rr, rb = region.box(info.width_px, info.height_px)
+    W, H = rr - rl, rb - rt  # se planifica sobre la zona recortada
+    s = _resolved_spec(info, spec, mode, length_step_mm, aspect_px, region)
     page_w_pt, page_h_pt = mm_to_pt(s.width_mm), mm_to_pt(s.height_mm)
 
     if mode == FitMode.COVER:
@@ -76,15 +90,15 @@ def plan(
         else:
             sw = W
             sh = min(H, max(1, round(W / aspect)))
-        left = round((W - sw) * crop.x)
-        top = round((H - sh) * crop.y)
+        left = rl + round((W - sw) * crop.x)
+        top = rt + round((H - sh) * crop.y)
         src_box = (left, top, left + sw, top + sh)
         dest = (0.0, 0.0, page_w_pt, page_h_pt)
     else:
         scale = min(page_w_pt / W, page_h_pt / H)
         dw, dh = W * scale, H * scale
         dest = ((page_w_pt - dw) / 2, (page_h_pt - dh) / 2, dw, dh)
-        src_box = (0, 0, W, H)
+        src_box = (rl, rt, rr, rb)
 
     if mode in (FitMode.CONTAIN, FitMode.FIT_LENGTH):
         background = Background()

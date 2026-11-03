@@ -60,6 +60,38 @@ class CropOffset:
         object.__setattr__(self, "y", float(min(1.0, max(0.0, self.y))))
 
 
+MIN_CROP_FRACTION = 0.02
+
+
+@dataclass(frozen=True)
+class CropRect:
+    """Recorte manual en fracciones (0–1) de la imagen ya orientada: izquierda, arriba,
+    derecha, abajo. Se aplica igual a la original y a la mejorada."""
+
+    x0: float = 0.0
+    y0: float = 0.0
+    x1: float = 1.0
+    y1: float = 1.0
+
+    def __post_init__(self) -> None:
+        vals = [float(min(1.0, max(0.0, v))) for v in (self.x0, self.y0, self.x1, self.y1)]
+        if vals[2] - vals[0] < MIN_CROP_FRACTION or vals[3] - vals[1] < MIN_CROP_FRACTION:
+            raise ValueError("El recorte es demasiado pequeño.")
+        for name, v in zip(("x0", "y0", "x1", "y1"), vals, strict=True):
+            object.__setattr__(self, name, v)
+
+    @property
+    def is_full(self) -> bool:
+        return (self.x0, self.y0, self.x1, self.y1) == (0.0, 0.0, 1.0, 1.0)
+
+    def box(self, w: int, h: int) -> tuple[int, int, int, int]:
+        """Caja en píxeles para una imagen de w×h (al menos 1 px por lado)."""
+        left, top = round(self.x0 * w), round(self.y0 * h)
+        right = max(left + 1, min(w, round(self.x1 * w)))
+        bottom = max(top + 1, min(h, round(self.y1 * h)))
+        return left, top, right, bottom
+
+
 @dataclass(frozen=True)
 class PrintSpec:
     width_mm: Decimal
