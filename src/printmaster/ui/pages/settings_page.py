@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -24,7 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from printmaster.core.enhance.gemini_api import API_NOTE
-from printmaster.core.enhance.gemini_web import DEFAULT_PROMPT
+from printmaster.core.enhance.gemini_web import DEFAULT_PROMPT, GEMINI_URL
 from printmaster.core.enhance.installer import find_engine, install_engine
 from printmaster.core.enhance.realesrgan import RealEsrgan
 from printmaster.domain.units import Unit
@@ -122,13 +123,44 @@ class SettingsPage(QWidget):
         lay.addWidget(ai_box)
         self._refresh_engine_status()
 
-        gem_box = QGroupBox("Gemini (web, gratis)")
+        gem_box = QGroupBox("Gemini (gratis)")
         gem = QVBoxLayout(gem_box)
-        gem.addWidget(QLabel("Prompt que se copia al pulsar «Mejorar en Gemini»:"))
+        gem_form = QFormLayout()
+        self.gemini_open_combo = QComboBox()
+        self.gemini_open_combo.addItem("Solo copiar (uso la app de escritorio, Alt+Espacio)",
+                                       "desktop")
+        self.gemini_open_combo.addItem("Abrir Gemini en el navegador", "web")
+        self.gemini_open_combo.setCurrentIndex(
+            max(0, self.gemini_open_combo.findData(self.settings.gemini_open_mode)))
+        gem_form.addRow("Al pulsar «Mejorar en Gemini»:", self.gemini_open_combo)
+        self.gemini_url_edit = QLineEdit(self.settings.gemini_url)
+        self.gemini_url_edit.setPlaceholderText(GEMINI_URL)
+        self.gemini_url_edit.setToolTip("Si crea un Gem, pegue aquí su dirección")
+        gem_form.addRow("Dirección de Gemini o de su Gem:", self.gemini_url_edit)
+        dl_row = QHBoxLayout()
+        self.downloads_edit = QLineEdit(str(self.settings.downloads_dir))
+        self.downloads_edit.setReadOnly(True)
+        self.change_downloads_btn = QPushButton("Cambiar…")
+        self.change_downloads_btn.clicked.connect(self._choose_downloads)
+        dl_row.addWidget(self.downloads_edit, 1)
+        dl_row.addWidget(self.change_downloads_btn)
+        gem_form.addRow("Carpeta de descargas:", dl_row)
+        gem.addLayout(gem_form)
+        guide = QLabel("Cree una vez un Gem en Gemini (Gems › Nuevo Gem), pegue estas "
+                       "instrucciones y guárdelo. Así no tendrá que pegar el prompt en cada "
+                       "imagen.")
+        guide.setWordWrap(True)
+        guide.setObjectName("muted")
+        gem.addWidget(guide)
         self.gemini_prompt_edit = QPlainTextEdit(self.settings.gemini_prompt)
         self.gemini_prompt_edit.setFixedHeight(80)
         gem.addWidget(self.gemini_prompt_edit)
         reset_row = QHBoxLayout()
+        self.copy_instructions_btn = QPushButton("Copiar instrucciones")
+        self.copy_instructions_btn.clicked.connect(
+            lambda: QGuiApplication.clipboard().setText(
+                self.gemini_prompt_edit.toPlainText().strip() or DEFAULT_PROMPT))
+        reset_row.addWidget(self.copy_instructions_btn)
         self.reset_prompt_btn = QPushButton("Restaurar prompt original")
         self.reset_prompt_btn.clicked.connect(
             lambda: self.gemini_prompt_edit.setPlainText(DEFAULT_PROMPT))
@@ -234,6 +266,12 @@ class SettingsPage(QWidget):
         if folder:
             self.output_edit.setText(folder)
 
+    def _choose_downloads(self) -> None:
+        folder = QFileDialog.getExistingDirectory(self, "Carpeta de descargas",
+                                                  self.downloads_edit.text())
+        if folder:
+            self.downloads_edit.setText(folder)
+
     def _delete_favorite(self) -> None:
         row = self.favorites_list.currentRow()
         if row >= 0:
@@ -255,6 +293,9 @@ class SettingsPage(QWidget):
         s.enhance_enabled = self.enhance_check.isChecked()
         s.enhance_target_ppi = self.target_ppi_spin.value()
         s.gemini_prompt = self.gemini_prompt_edit.toPlainText().strip() or DEFAULT_PROMPT
+        s.gemini_open_mode = self.gemini_open_combo.currentData()
+        s.gemini_url = self.gemini_url_edit.text().strip() or GEMINI_URL
+        s.downloads_dir = Path(self.downloads_edit.text())
         s.advanced_open = load_settings().advanced_open  # lo maneja el panel de trabajo
         save_settings(s)
         self.status_label.setText("Configuración guardada.")
