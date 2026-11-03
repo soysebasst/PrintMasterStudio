@@ -165,3 +165,24 @@ def test_ctrl_v_in_spinbox_is_ignored(page, qtbot, make_image, tmp_path):
     qtbot.wait(200)
     assert page._attaching is None and page.controller.items[0].enhanced is None
     assert page.messages == []
+
+
+def test_waiting_panel_does_not_widen(qtbot, settings, make_image, tmp_path):
+    from PySide6.QtWidgets import QScrollArea
+
+    from printmaster.ui.main_window import MainWindow
+    settings.enhance_enabled = False
+    win = MainWindow(settings)
+    qtbot.addWidget(win)
+    win.resize(1366, 697)
+    win.show()
+    win.nav.setCurrentRow(1)
+    page = win.job_page
+    page._info = lambda t, m: None
+    sa = page.findChildren(QScrollArea)[0]
+    load(page, qtbot, make_image, tmp_path,
+         [("64c8afd79a384e67e2ffb4ff62cc71e4_nombre_largo.jpg", (236, 420))])
+    qtbot.mouseClick(page.quality.gemini_btn, Qt.LeftButton)
+    qtbot.wait(200)
+    assert sa.widget().width() <= sa.viewport().width()
+    assert page.quality.gemini_btn.geometry().right() <= sa.viewport().width()

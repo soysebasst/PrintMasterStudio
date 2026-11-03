@@ -23,6 +23,13 @@
 - Acceso directo con doble clic (`crear_acceso_directo.bat`), sin consola
 - Gemini por API: interfaz preparada, sin activar (requiere facturación)
 
+## Fase 2C — implementada (pendiente de validación en Windows)
+- «Mejorar en Gemini» copia la imagen (máx. 3072 px); modo app de escritorio (Alt+Espacio) o navegador
+- La app vigila Descargas y adjunta el resultado sola; también Ctrl+V / «Pegar mejorada»
+- Guía del Gem con «Copiar instrucciones» y carpeta de descargas configurable
+- Estilo morado con iconos SVG, marca en la barra lateral e Inicio con favoritos en botones
+- Checklist: `docs/acceptance/aceptacion.md` (sección Fase 2C)
+
 ## Siguiente
 - Fase 2: procesamiento por lotes en segundo plano con pool de procesos, pausa/reanudar/cancelar,
   persistencia en SQLite, historial y regeneración, registro de errores visible

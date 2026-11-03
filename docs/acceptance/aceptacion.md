@@ -129,3 +129,38 @@ git pull
 | ¿La interfaz es más clara? ¿Qué falta? | |
 | Resultado impreso con Gemini | |
 | Comentarios | |
+
+
+---
+
+# Fase 2C — Gemini en menos pasos y estilo morado
+
+## 1. Actualizar
+
+```powershell
+cd C:\PrintMaster
+git pull
+.venv\Scripts\pip install -e ".[dev]"
+```
+
+## 2. Configurar Gemini (una vez)
+
+- [ ] Configuración › Gemini: elige «Solo copiar (uso la app de escritorio, Alt+Espacio)» o «Abrir Gemini en el navegador».
+- [ ] Opcional: en Gemini crea un Gem (Gems › Nuevo Gem), pega lo que copia «Copiar instrucciones» y guarda. Pega la dirección del Gem en «Dirección de Gemini o de su Gem».
+- [ ] Revisa que «Carpeta de descargas» sea la carpeta donde guarda el navegador/la app.
+
+## 3. Flujo
+
+- [ ] Selecciona una imagen y pulsa **Mejorar en Gemini**. Aparece «Esperando descarga de Gemini…».
+- [ ] En Gemini: Ctrl+V, enviar.
+- [ ] Prueba A: descarga el resultado. Debe adjuntarse solo en unos segundos («Mejora recibida de Gemini…»).
+- [ ] Prueba B: en otra imagen, copia el resultado (clic derecho › Copiar imagen) y pulsa Ctrl+V en la app.
+- [ ] Prueba C: pulsa Ctrl+V sin copiar el resultado → aviso de que el portapapeles tiene la original.
+- [ ] Revisa largo, precio, insignia **Gemini**, exporta e imprime a «Tamaño real».
+
+| Dato | Valor |
+|---|---|
+| ¿La descarga se detectó sola? | |
+| ¿Ctrl+V funcionó desde la app de escritorio de Gemini? | |
+| ¿El nuevo estilo se ve bien? | |
+| Comentarios | |

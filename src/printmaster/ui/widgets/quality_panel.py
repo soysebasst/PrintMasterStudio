@@ -26,6 +26,17 @@ CHIP_STYLE = {  # fondo, texto
     QualityLevel.ACEPTABLE: ("#3a3018", "#f0c15a"), QualityLevel.BAJA: ("#3d2a18", "#ffab70"),
     QualityLevel.MUY_BAJA: ("#3d1f22", "#ff8a8a"),
 }
+WAIT_NAME_CHARS = 26
+
+
+def _short(name: str | None) -> str:
+    """Acorta nombres largos por el medio para que no ensanchen el panel."""
+    if name is None or len(name) <= WAIT_NAME_CHARS:
+        return name or ""
+    half = (WAIT_NAME_CHARS - 1) // 2
+    return f"{name[:half]}…{name[-half:]}"
+
+
 GEMINI_NOTE = "Gemini redibuja la imagen: revise textos, logos y caras antes de aprobar."
 
 
@@ -89,11 +100,12 @@ class QualityPanel(QWidget):
         self.gemini_btn.setIcon(icon("sparkles", "#ffffff", 18))
         self.gemini_btn.setToolTip("Copia la imagen al portapapeles para pegarla en Gemini")
         lay.addWidget(self.gemini_btn)
-        wait_row = QHBoxLayout()
         self.wait_label = QLabel("")
         self.wait_label.setWordWrap(True)
         self.wait_label.setObjectName("muted")
-        wait_row.addWidget(self.wait_label, 1)
+        lay.addWidget(self.wait_label)
+        wait_row = QHBoxLayout()
+        wait_row.addStretch(1)
         self.copy_prompt_btn = QPushButton("Copiar prompt")
         self.copy_prompt_btn.setObjectName("linkButton")
         wait_row.addWidget(self.copy_prompt_btn)
@@ -128,7 +140,8 @@ class QualityPanel(QWidget):
     def set_waiting(self, name: str | None, *, show_copy_prompt: bool = False) -> None:
         """Muestra u oculta el estado «Esperando descarga de Gemini…»."""
         waiting = name is not None
-        self.wait_label.setText(f"Esperando descarga de Gemini para «{name}»…" if waiting else "")
+        self.wait_label.setText(
+            f"Esperando descarga de Gemini para «{_short(name)}»…" if waiting else "")
         self.wait_label.setVisible(waiting)
         self.stop_wait_btn.setVisible(waiting)
         self.copy_prompt_btn.setVisible(waiting and show_copy_prompt)

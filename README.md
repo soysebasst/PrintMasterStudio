@@ -33,11 +33,18 @@ Después de instalar, haz **doble clic en `crear_acceso_directo.bat`** (en la ca
 Crea **"PrintMaster Studio"** en el Escritorio y en el menú Inicio. Abre la app sin consola, usando
 `.venv\Scripts\printmaster-studio.exe`.
 
-## Mejorar con Gemini (gratis, por la web)
+## Mejorar con Gemini (gratis)
 
-1. Selecciona la imagen y pulsa **«Mejorar en Gemini»**: se copia el prompt, se abre Gemini y la carpeta de la imagen.
-2. En Gemini: sube la imagen, pega el prompt (Ctrl+V) y descarga el resultado.
-3. Suelta el archivo descargado en **«Suelta aquí la mejorada»**. La app conserva el largo y el precio del original y termina de ampliar la imagen en el PC si hace falta.
+1. Selecciona la imagen y pulsa **«Mejorar en Gemini»**: la app copia **la imagen** al portapapeles.
+   - Modo por defecto: no abre nada; abre la app de escritorio de Gemini con **Alt+Espacio**.
+   - Modo navegador (Configuración › Gemini): abre la dirección de Gemini o de tu Gem.
+2. En Gemini pega con **Ctrl+V** y envía. Si creaste un **Gem** con las instrucciones (Configuración › «Copiar instrucciones»), no hace falta pegar el prompt; si no, usa el enlace «Copiar prompt».
+3. Trae el resultado de una de estas formas:
+   - **Descárgalo**: la app vigila la carpeta de Descargas y lo adjunta sola a la imagen en espera (hasta 15 minutos).
+   - **Cópialo** (clic derecho › Copiar imagen) y pulsa **Ctrl+V** en la app o «Pegar mejorada».
+   - Arrástralo a la zona punteada.
+
+La app conserva el largo y el precio del original y termina de ampliar la imagen en el PC si hace falta.
 
 ## Desarrollo y pruebas
 
