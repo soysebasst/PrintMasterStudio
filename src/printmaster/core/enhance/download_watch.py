@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+from collections.abc import Collection
 from pathlib import Path
 
 from printmaster.core.image_loader import SUPPORTED_EXTENSIONS
@@ -30,29 +32,38 @@ class DownloadWatch:
     def _candidates(self) -> list[tuple[float, Path, int]]:
         found = []
         try:
-            entries = list(self.folder.iterdir())
+            with os.scandir(self.folder) as it:  # stat en caché en Windows: barato cada segundo
+                entries = list(it)
         except OSError:
             return []
-        for p in entries:
-            name = p.name.lower()
-            if name.endswith(PARTIAL_SUFFIXES) or p.suffix.lower() not in self.exts:
+        for entry in entries:
+            name = entry.name.lower()
+            if name.endswith(PARTIAL_SUFFIXES) or Path(name).suffix not in self.exts:
                 continue
             try:
-                st = p.stat()
+                if not entry.is_file():
+                    continue
+                st = entry.stat()
             except OSError:
                 continue
-            if st.st_size > 0 and st.st_mtime >= self.since and p.is_file():
-                found.append((st.st_mtime, p, st.st_size))
+            if st.st_size > 0 and st.st_mtime >= self.since:
+                found.append((st.st_mtime, Path(entry.path), st.st_size))
         return sorted(found, reverse=True)
 
-    def poll(self) -> Path | None:
+    def poll(self, exclude: Collection[Path] = (), oldest: bool = False) -> Path | None:
+        """La imagen nueva y completa más reciente (u, con `oldest`, la más antigua).
+
+        `exclude` son archivos ya usados que no deben devolverse otra vez.
+        """
         if not self.folder_ok:
             return None
-        result = None
+        stable = []
         sizes: dict[Path, int] = {}
         for _mtime, path, size in self._candidates():
             sizes[path] = size
-            if result is None and self._sizes.get(path) == size:
-                result = path
+            if path not in exclude and self._sizes.get(path) == size:
+                stable.append(path)
         self._sizes = sizes
-        return result
+        if not stable:
+            return None
+        return stable[-1] if oldest else stable[0]

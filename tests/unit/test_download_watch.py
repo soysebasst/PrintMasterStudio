@@ -59,3 +59,15 @@ def test_settings_defaults():
     assert s.gemini_open_mode == "desktop"
     assert s.downloads_dir.name == "Downloads"
     assert s.gemini_url.startswith("https://gemini.google.com")
+
+
+def test_oldest_and_exclude(tmp_path):
+    t = time.time()
+    w = DownloadWatch(tmp_path, since=t - 10)
+    a = png(tmp_path / "a.png", mtime=t - 5)
+    b = png(tmp_path / "b.png", mtime=t - 2)
+    w.poll()
+    assert w.poll(oldest=True) == a
+    assert w.poll(exclude={a}, oldest=True) == b
+    assert w.poll(exclude={a}) == b
+    assert w.poll(exclude={a, b}) is None

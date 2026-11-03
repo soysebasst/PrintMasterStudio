@@ -104,7 +104,8 @@ def test_stop_waiting(page, qtbot, make_image, tmp_path):
 def test_wait_expires(page, qtbot, make_image, tmp_path):
     load(page, qtbot, make_image, tmp_path, [("a.jpg", (236, 420))])
     qtbot.mouseClick(page.quality.gemini_btn, Qt.LeftButton)
-    page._wait_started -= WAIT_TIMEOUT_S + 1
+    item, started = page._waits[0]
+    page._waits[0] = (item, started - WAIT_TIMEOUT_S - 1)
     page._poll_downloads()
     assert page._waiting is None
     assert "Ya no se espera la descarga de Gemini." in page.next_label.text()
@@ -182,7 +183,81 @@ def test_waiting_panel_does_not_widen(qtbot, settings, make_image, tmp_path):
     sa = page.findChildren(QScrollArea)[0]
     load(page, qtbot, make_image, tmp_path,
          [("64c8afd79a384e67e2ffb4ff62cc71e4_nombre_largo.jpg", (236, 420))])
+    qtbot.wait(200)
+    before = sa.widget().minimumSizeHint().width()  # depende de las fuentes de cada sistema
     qtbot.mouseClick(page.quality.gemini_btn, Qt.LeftButton)
     qtbot.wait(200)
-    assert sa.widget().width() <= sa.viewport().width()
-    assert page.quality.gemini_btn.geometry().right() <= sa.viewport().width()
+    assert page.quality.wait_label.isVisibleTo(page)
+    assert sa.widget().minimumSizeHint().width() <= before  # esperar no ensancha el panel
+
+
+def test_fifo_waits_attach_in_order(page, qtbot, make_image, tmp_path):
+    load(page, qtbot, make_image, tmp_path, [("a.jpg", (236, 420)), ("b.jpg", (300, 300))])
+    a, b = page.controller.items
+    qtbot.mouseClick(page.quality.gemini_btn, Qt.LeftButton)
+    page.queue.list.setCurrentIndex(page.model.index(1))
+    qtbot.mouseClick(page.quality.gemini_btn, Qt.LeftButton)
+    assert [it for it, _ in page._waits] == [a, b]
+    Image.new("RGB", (2304, 4096), (240, 200, 120)).save(page.settings.downloads_dir / "1.png")
+    page._poll_downloads()
+    page._poll_downloads()
+    qtbot.waitUntil(lambda: a.enhanced is not None, timeout=60000)
+    assert b.enhanced is None and [it for it, _ in page._waits] == [b]
+    Image.new("RGB", (3000, 3000), (240, 200, 120)).save(page.settings.downloads_dir / "2.png")
+    page._poll_downloads()
+    page._poll_downloads()
+    qtbot.waitUntil(lambda: b.enhanced is not None, timeout=60000)
+    assert page._waiting is None
+
+
+def test_download_during_export_keeps_waiting(page, qtbot, make_image, tmp_path):
+    load(page, qtbot, make_image, tmp_path, [("a.jpg", (236, 420))])
+    qtbot.mouseClick(page.quality.gemini_btn, Qt.LeftButton)
+    Image.new("RGB", (2304, 4096), (240, 200, 120)).save(page.settings.downloads_dir / "g.png")
+    page._exporting = True
+    page._poll_downloads()
+    page._poll_downloads()
+    assert page._waiting is not None and page._attaching is None
+    page._exporting = False
+    page._poll_downloads()
+    qtbot.waitUntil(lambda: page.controller.items[0].enhanced is not None, timeout=60000)
+
+
+def test_second_attach_same_item_ignored(page, qtbot, make_image, tmp_path):
+    load(page, qtbot, make_image, tmp_path, [("a.jpg", (236, 420))])
+    g = tmp_path / "g.png"
+    Image.new("RGB", (2304, 4096), (240, 200, 120)).save(g)
+    page._on_external_dropped(g)
+    page._on_external_dropped(g)  # Ctrl+V mientras la descarga aún se adjunta
+    assert any("Ya se está" in m for m in page.messages)
+    qtbot.waitUntil(lambda: page.controller.items[0].enhanced is not None, timeout=60000)
+    qtbot.waitUntil(lambda: page._attaching is None and not page._attach_cancels, timeout=5000)
+
+
+def test_background_attach_keeps_current_inspector(page, qtbot, make_image, tmp_path):
+    from printmaster.domain.models import EnhanceChoice
+    load(page, qtbot, make_image, tmp_path, [("a.jpg", (236, 420)), ("b.jpg", (300, 300))])
+    a, b = page.controller.items
+    a.enhance_choice = EnhanceChoice.ON
+    page.queue.list.setCurrentIndex(page.model.index(1))
+    shown = page.inspector.enhance_combo.currentData()
+    page._attach_done(a, None)
+    assert page.inspector.enhance_combo.currentData() == shown
+
+
+def test_digest_ignores_row_padding():
+    w, h = 37, 11
+    row = bytes(range(w * 3))
+    data1 = b"".join(row + b"\x00" * 5 for _ in range(h))
+    data2 = b"".join(row + b"\xff" * 5 for _ in range(h))
+    img1 = QImage(data1, w, h, w * 3 + 5, QImage.Format_RGB888)
+    img2 = QImage(data2, w, h, w * 3 + 5, QImage.Format_RGB888)
+    assert JobPage._digest(img1) == JobPage._digest(img2)
+
+
+def test_missing_downloads_folder_warns(page, qtbot, make_image, tmp_path):
+    page.settings.downloads_dir = tmp_path / "no_existe"
+    load(page, qtbot, make_image, tmp_path, [("a.jpg", (236, 420))])
+    qtbot.mouseClick(page.quality.gemini_btn, Qt.LeftButton)
+    page._poll_downloads()
+    assert "No se encuentra la carpeta de descargas" in page.quality.wait_label.text()

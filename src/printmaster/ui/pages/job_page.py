@@ -88,10 +88,11 @@ class JobPage(QWidget):
         self._cancel_enhance = threading.Event()
         self._show_original = False
         self._gemini_hint: str | None = None
-        self._attaching: JobItem | None = None
-        self._attach_cancel = threading.Event()
-        self._waiting: tuple[JobItem, DownloadWatch] | None = None
-        self._wait_started = 0.0
+        self._attaching: JobItem | None = None  # el último adjunto en curso
+        self._attach_cancels: dict[int, threading.Event] = {}  # id(item) -> cancelación
+        self._waits: list[tuple[JobItem, float]] = []  # en espera de Gemini (FIFO), con su inicio
+        self._watch: DownloadWatch | None = None
+        self._consumed: set[Path] = set()
         self._copied_digest: tuple[int, int, str] | None = None
         self._watch_timer = QTimer(self)
         self._watch_timer.setInterval(WATCH_INTERVAL_MS)
@@ -661,8 +662,8 @@ class JobPage(QWidget):
         self._enhance_finished(item)
 
     def _cancel_enhancements(self) -> None:
-        if self._attaching is not None:
-            self._attach_cancel.set()
+        for ev in self._attach_cancels.values():
+            ev.set()
         self._skip_enhance.extend(self._enhance_queue)
         if self._enhancing is not None:
             self._skip_enhance.append(self._enhancing)
@@ -706,12 +707,12 @@ class JobPage(QWidget):
 
     @staticmethod
     def _digest(img: QImage) -> tuple[int, int, str]:
-        rgb = img.convertToFormat(QImage.Format_RGB888)
+        rgb = img.convertToFormat(QImage.Format_RGBX8888)  # 4 bytes por píxel: sin relleno
         return rgb.width(), rgb.height(), hashlib.sha1(bytes(rgb.constBits())).hexdigest()
 
     def _on_gemini(self) -> None:
         i = self._current_index()
-        if i < 0:
+        if i < 0 or self._exporting:
             return
         item = self.controller.items[i]
         try:
@@ -723,49 +724,82 @@ class JobPage(QWidget):
         self._copied_digest = self._digest(qimg)
         if self.settings.gemini_open_mode == "web":
             self._open_url(self.settings.gemini_url)
-        self._waiting = (item, DownloadWatch(Path(self.settings.downloads_dir), time.time() - 1))
-        self._wait_started = time.monotonic()
+        if self._watch is None:
+            self._watch = DownloadWatch(Path(self.settings.downloads_dir), time.time() - 1)
+            self._consumed = set()
+        self._waits = [(it, t) for it, t in self._waits if it is not item]
+        self._waits.append((item, time.monotonic()))
         self._watch_timer.start()
         self._gemini_hint = MSG_COPIED
         self._refresh_waiting()
         self._update_state()
 
+    @property
+    def _waiting(self) -> tuple[JobItem, DownloadWatch] | None:
+        """La imagen en espera más antigua (la próxima en recibir una descarga)."""
+        if not self._waits or self._watch is None:
+            return None
+        return self._waits[0][0], self._watch
+
     def _has_gem(self) -> bool:
         return "/gem/" in self.settings.gemini_url
 
     def _refresh_waiting(self) -> None:
-        name = self._waiting[0].path.name if self._waiting is not None else None
+        if not self._waits:
+            self.quality.set_waiting(None)
+            return
+        name = self._waits[0][0].path.name
+        if len(self._waits) > 1:
+            name += f"» y {len(self._waits) - 1} más «"
         self.quality.set_waiting(name, show_copy_prompt=not self._has_gem())
+        if self._watch is not None and not self._watch.folder_ok:
+            self.quality.wait_label.setText(
+                "No se encuentra la carpeta de descargas (Configuración › Gemini). "
+                "Copie el resultado y pulse Ctrl+V.")
+
+    def _unwait(self, item: JobItem) -> None:
+        self._waits = [(it, t) for it, t in self._waits if it is not item]
+        if not self._waits:
+            self._stop_waiting()
+        else:
+            self._refresh_waiting()
 
     def _stop_waiting(self) -> None:
-        self._waiting = None
+        self._waits = []
+        self._watch = None
         self._watch_timer.stop()
         self._refresh_waiting()
 
     def _poll_downloads(self) -> None:
-        if self._waiting is None:
-            self._watch_timer.stop()
-            return
-        item, watch = self._waiting
-        if self._row_of(item) < 0:
+        if self._exporting:
+            return  # se sigue esperando: se adjunta al terminar la exportación
+        now = time.monotonic()
+        alive = [(it, t) for it, t in self._waits if self._row_of(it) >= 0]
+        expired = [w for w in alive if now - w[1] > WAIT_TIMEOUT_S]
+        self._waits = [w for w in alive if w not in expired]
+        if not self._waits or self._watch is None:
             self._stop_waiting()
+            if expired:
+                self._gemini_hint = MSG_EXPIRED
+                self._update_state()
             return
-        if time.monotonic() - self._wait_started > WAIT_TIMEOUT_S:
-            self._stop_waiting()
-            self._gemini_hint = MSG_EXPIRED
-            self._update_state()
+        self._refresh_waiting()
+        found = self._watch.poll(exclude=self._consumed, oldest=True)
+        if found is None:
             return
-        found = watch.poll()
-        if found is not None:
-            self._stop_waiting()
-            self._on_external_dropped(
-                found, target=item, notice=f"Mejora recibida de Gemini para «{item.path.name}»")
+        self._consumed.add(found)
+        item = self._waits[0][0]
+        self._unwait(item)
+        self._on_external_dropped(
+            found, target=item, notice=f"Mejora recibida de Gemini para «{item.path.name}»")
 
     def _paste_target(self) -> JobItem | None:
-        if self._waiting is not None and self._row_of(self._waiting[0]) >= 0:
-            return self._waiting[0]
         i = self._current_index()
-        return self.controller.items[i] if i >= 0 else None
+        current = self.controller.items[i] if i >= 0 else None
+        waiting = [it for it, _ in self._waits if self._row_of(it) >= 0]
+        if current is not None and any(it is current for it in waiting):
+            return current
+        return waiting[0] if waiting else current
 
     def _paste_from_clipboard(self) -> None:
         if isinstance(QApplication.focusWidget(), (QLineEdit, QAbstractSpinBox, QPlainTextEdit)):
@@ -797,8 +831,6 @@ class JobPage(QWidget):
         if path is None:
             self._info("Mejora con Gemini", MSG_NO_IMAGE)
             return
-        if self._waiting is not None and self._waiting[0] is target:
-            self._stop_waiting()
         self._on_external_dropped(path, target=target,
                                   notice=f"Mejora pegada en «{target.path.name}»")
 
@@ -816,43 +848,53 @@ class JobPage(QWidget):
             i = self._row_of(item)
             if i < 0:
                 return
-        if self._waiting is not None and self._waiting[0] is item:
-            self._stop_waiting()
+        if id(item) in self._attach_cancels:
+            self._info("Mejora con Gemini",
+                       f"Ya se está adjuntando una mejora a «{item.path.name}». Espere a que "
+                       "termine.")
+            return
+        self._unwait(item)
         if self._enhancing is item:
             self._cancel_enhance.set()  # la versión de Gemini reemplaza la mejora automática
         self._enhance_queue = [it for it in self._enhance_queue if it is not item]
         self._skip_enhance.append(item)
         self._attaching = item
-        self._attach_cancel = threading.Event()
+        cancel = threading.Event()
+        self._attach_cancels[id(item)] = cancel
         item.enhancing = True
         self.model.refresh(i)
         if i == self._current_index():
             self._show_diagnosis(i)
         self._update_state()
-        run_async(self._attach, item, Path(path),
+        run_async(self._attach, item, Path(path), cancel,
                   on_done=lambda res, it=item: self._attach_done(it, res, notice),
                   on_failed=lambda msg, it=item: self._attach_failed(it, msg), owner=self)
 
-    def _attach(self, item: JobItem, path: Path):
+    def _attach(self, item: JobItem, path: Path, cancel: threading.Event | None = None):
         try:
             row = self._row_of(item)
             if row < 0:
                 return None
             return self.controller.attach_external(row, path, self.enhancer,
-                                                   cancel=self._attach_cancel)
+                                                   cancel=cancel)
         finally:
             item.enhancing = False
 
-    def _attach_done(self, item: JobItem, res, notice: str | None = None) -> None:
+    def _attach_finished(self, item: JobItem) -> None:
         item.enhancing = False
-        self._attaching = None
-        self.inspector.set_enhance_choice(item.enhance_choice)
+        self._attach_cancels.pop(id(item), None)
+        if self._attaching is item:
+            self._attaching = None
+
+    def _attach_done(self, item: JobItem, res, notice: str | None = None) -> None:
+        self._attach_finished(item)
         self._gemini_hint = notice if res is not None else None
         self._show_original = False
         row = self._row_of(item)
         if row >= 0:
             self.model.refresh(row)
             if row == self._current_index():
+                self.inspector.set_enhance_choice(item.enhance_choice)
                 self._show_diagnosis(row)
                 self._redraw_current()
         self._update_state()
@@ -862,8 +904,7 @@ class JobPage(QWidget):
                        "extendió). Se ajustará sin deformarla.")
 
     def _attach_failed(self, item: JobItem, message: str) -> None:
-        item.enhancing = False
-        self._attaching = None
+        self._attach_finished(item)
         row = self._row_of(item)
         if row >= 0:
             self.model.refresh(row)
