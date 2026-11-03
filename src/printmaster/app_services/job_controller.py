@@ -483,7 +483,9 @@ class JobController:
         for i, item in enumerate(self.items):
             if item.status != ItemStatus.READY:
                 continue
-            if item.diagnosis is None or item.diagnosis.level in _LOW_LEVELS:
+            if item.diagnosis is None or (item.diagnosis.level in _LOW_LEVELS
+                                          and not item.uses_enhanced):
+                # una mejora de Gemini ya es la mejor versión disponible: se aprueba
                 skipped.append(i)
                 continue
             item.status = ItemStatus.APPROVED

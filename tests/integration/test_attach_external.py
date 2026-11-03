@@ -80,3 +80,12 @@ def test_corrupt_drop_keeps_previous(ctrl, tmp_path):
 def test_aspect_helper():
     assert aspect_mismatch((236, 420), (2304, 4096)) is False
     assert aspect_mismatch((236, 420), (1024, 1024)) is True
+
+
+def test_approve_all_includes_gemini_results_even_if_low(ctrl, tmp_path, make_image):
+    ctrl.add_paths([make_image("otra.jpg", size=(236, 420), seed=7)])
+    ctrl.analyze(1)
+    ctrl.attach_external(0, gemini_png(tmp_path, (1152, 2048)))  # sin pase local: «Baja»
+    skipped = ctrl.approve_all()
+    assert skipped == [1]  # la que no pasó por Gemini sigue pidiendo revisión individual
+    assert ctrl.items[0].status.name == "APPROVED"

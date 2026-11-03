@@ -75,8 +75,12 @@ class _ProgressBridge(QObject):
 
 class JobPage(QWidget):
     def __init__(self, settings: Settings, profile: PrinterProfile,
-                 enhancer: Enhancer | None = None, parent=None) -> None:
+                 enhancer: Enhancer | None = None, parent=None, *,
+                 local_enhance: bool = False) -> None:
+        """local_enhance: mejora local (Real-ESRGAN/básica). Desde la fase 2D la app usa solo
+        Gemini; se conserva desactivada por si se vuelve a necesitar."""
         super().__init__(parent)
+        self.local_enhance = local_enhance
         pool = QThreadPool.globalInstance()
         pool.setMaxThreadCount(min(pool.maxThreadCount(), MAX_BACKGROUND_THREADS))
         self.settings = settings
@@ -182,6 +186,7 @@ class JobPage(QWidget):
         self.diagnosis = self.quality  # compatibilidad: show_diagnosis() / text()
         self.inspector.layout().insertWidget(self.inspector.quality_insert_index(), self.quality)
         self.quality.choice_row.addWidget(self.inspector.enhance_combo, 1)
+        self.inspector.enhance_combo.setVisible(self.local_enhance)
         self.quality.choice_row.setSpacing(6)
         self.inspector.toggles_row.insertWidget(0, self.quality.details_toggle)
         side_lay.addWidget(self.inspector)
@@ -617,6 +622,8 @@ class JobPage(QWidget):
         return any(x is item for x in items)
 
     def _maybe_enqueue(self, item: JobItem) -> None:
+        if not self.local_enhance:
+            return
         row = self._row_of(item)
         if (row < 0 or item is self._enhancing or self._contains(self._enhance_queue, item)
                 or self._contains(self._skip_enhance, item)):
@@ -944,7 +951,8 @@ class JobPage(QWidget):
             row = self._row_of(item)
             if row < 0:
                 return None
-            return self.controller.attach_external(row, path, self.enhancer,
+            return self.controller.attach_external(row, path,
+                                                   self.enhancer if self.local_enhance else None,
                                                    cancel=cancel)
         finally:
             item.enhancing = False
