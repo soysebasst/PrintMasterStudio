@@ -2,18 +2,24 @@
 
 from __future__ import annotations
 
+import hashlib
 import subprocess
 import threading
+import time
 from collections import OrderedDict
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Qt, QThreadPool, QUrl, Signal
-from PySide6.QtGui import QDesktopServices, QGuiApplication, QImage
+from PySide6.QtCore import QObject, Qt, QThreadPool, QTimer, QUrl, Signal
+from PySide6.QtGui import QDesktopServices, QGuiApplication, QImage, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QAbstractSpinBox,
+    QApplication,
     QButtonGroup,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMessageBox,
+    QPlainTextEdit,
     QProgressBar,
     QPushButton,
     QScrollArea,
@@ -24,11 +30,12 @@ from PySide6.QtWidgets import (
 
 from printmaster.app_services.job_controller import JobController, JobItem
 from printmaster.app_services.next_step import next_step
+from printmaster.core.enhance.download_watch import DownloadWatch
 from printmaster.core.enhance.enhancer import ENGINE_AI, Enhancer, EnhanceResult
-from printmaster.core.enhance.gemini_web import GEMINI_URL, reveal_command
+from printmaster.core.enhance.gemini_web import reveal_command
 from printmaster.core.enhance.installer import find_engine
 from printmaster.core.enhance.realesrgan import EnhanceCancelled
-from printmaster.core.image_loader import load_proxy
+from printmaster.core.image_loader import SUPPORTED_EXTENSIONS, load_proxy
 from printmaster.core.pdf_writer import ExportOptions
 from printmaster.core.pricing import format_cop
 from printmaster.domain.models import FitMode, ItemStatus
@@ -45,6 +52,15 @@ from printmaster.ui.widgets.queue_view import QueueView
 from printmaster.ui.workers import run_async
 
 PREVIEW_SIDE = 1600
+CLIPBOARD_SIDE = 3072  # lado mayor máximo de la imagen que se copia para Gemini
+WAIT_TIMEOUT_S = 900  # 15 minutos esperando la descarga de Gemini
+WATCH_INTERVAL_MS = 1000
+MSG_COPIED = ("Imagen copiada. En Gemini: Ctrl+V y enviar. Luego descargue el resultado o "
+              "cópielo (clic derecho › Copiar imagen) y pulse Ctrl+V aquí.")
+MSG_EXPIRED = "Ya no se espera la descarga de Gemini."
+MSG_SAME_IMAGE = ("El portapapeles todavía tiene la imagen original. En Gemini use clic "
+                  "derecho › Copiar imagen sobre el resultado.")
+MSG_NO_IMAGE = "No hay ninguna imagen en el portapapeles."
 MAX_BACKGROUND_THREADS = 2  # especificación R5: como máximo 2 imágenes decodificándose a la vez
 PREVIEW_CACHE = 8
 STEPS = ["1  Cargar", "2  Revisar", "3  Exportar"]
@@ -74,6 +90,12 @@ class JobPage(QWidget):
         self._gemini_hint: str | None = None
         self._attaching: JobItem | None = None
         self._attach_cancel = threading.Event()
+        self._waiting: tuple[JobItem, DownloadWatch] | None = None
+        self._wait_started = 0.0
+        self._copied_digest: tuple[int, int, str] | None = None
+        self._watch_timer = QTimer(self)
+        self._watch_timer.setInterval(WATCH_INTERVAL_MS)
+        self._watch_timer.timeout.connect(self._poll_downloads)
         self._exporting = False
         self._pending_settings: Settings | None = None
         self._bridge = _ProgressBridge()
@@ -208,6 +230,13 @@ class JobPage(QWidget):
         self.inspector.enhance_choice_changed.connect(self._on_enhance_choice)
         self.quality.gemini_btn.clicked.connect(self._on_gemini)
         self.quality.drop_zone.file_dropped.connect(self._on_external_dropped)
+        self.quality.paste_btn.clicked.connect(self._paste_from_clipboard)
+        self.quality.stop_wait_btn.clicked.connect(self._stop_waiting)
+        self.quality.copy_prompt_btn.clicked.connect(
+            lambda: QGuiApplication.clipboard().setText(self.settings.gemini_prompt))
+        self._paste_shortcut = QShortcut(QKeySequence.Paste, self,
+                                         context=Qt.WidgetWithChildrenShortcut)
+        self._paste_shortcut.activated.connect(self._paste_from_clipboard)
         self.queue.current_changed.connect(self._on_current_changed)
         self.queue.paths_added.connect(self._on_paths_added)
         self.model.rowsRemoved.connect(lambda *a: self._after_queue_change())
@@ -675,23 +704,120 @@ class JobPage(QWidget):
         except OSError:
             pass
 
+    @staticmethod
+    def _digest(img: QImage) -> tuple[int, int, str]:
+        rgb = img.convertToFormat(QImage.Format_RGB888)
+        return rgb.width(), rgb.height(), hashlib.sha1(bytes(rgb.constBits())).hexdigest()
+
     def _on_gemini(self) -> None:
         i = self._current_index()
         if i < 0:
             return
         item = self.controller.items[i]
-        QGuiApplication.clipboard().setText(self.settings.gemini_prompt)
-        self._open_url(GEMINI_URL)
-        self._reveal(item.path)
-        self._gemini_hint = ("Prompt copiado. En Gemini: sube la imagen, pega con Ctrl+V y "
-                             "descarga el resultado. Luego suéltalo en «Suelta aquí la mejorada».")
+        try:
+            qimg = pil_to_qimage(load_proxy(item.path, max_side=CLIPBOARD_SIDE))
+        except Exception as exc:  # noqa: BLE001
+            self._info("Mejora con Gemini", f"No se pudo copiar la imagen: {exc}")
+            return
+        QGuiApplication.clipboard().setImage(qimg)
+        self._copied_digest = self._digest(qimg)
+        if self.settings.gemini_open_mode == "web":
+            self._open_url(self.settings.gemini_url)
+        self._waiting = (item, DownloadWatch(Path(self.settings.downloads_dir), time.time() - 1))
+        self._wait_started = time.monotonic()
+        self._watch_timer.start()
+        self._gemini_hint = MSG_COPIED
+        self._refresh_waiting()
         self._update_state()
 
-    def _on_external_dropped(self, path: Path) -> None:
-        i = self._current_index()
-        if i < 0 or self._exporting:
+    def _has_gem(self) -> bool:
+        return "/gem/" in self.settings.gemini_url
+
+    def _refresh_waiting(self) -> None:
+        name = self._waiting[0].path.name if self._waiting is not None else None
+        self.quality.set_waiting(name, show_copy_prompt=not self._has_gem())
+
+    def _stop_waiting(self) -> None:
+        self._waiting = None
+        self._watch_timer.stop()
+        self._refresh_waiting()
+
+    def _poll_downloads(self) -> None:
+        if self._waiting is None:
+            self._watch_timer.stop()
             return
-        item = self.controller.items[i]
+        item, watch = self._waiting
+        if self._row_of(item) < 0:
+            self._stop_waiting()
+            return
+        if time.monotonic() - self._wait_started > WAIT_TIMEOUT_S:
+            self._stop_waiting()
+            self._gemini_hint = MSG_EXPIRED
+            self._update_state()
+            return
+        found = watch.poll()
+        if found is not None:
+            self._stop_waiting()
+            self._on_external_dropped(
+                found, target=item, notice=f"Mejora recibida de Gemini para «{item.path.name}»")
+
+    def _paste_target(self) -> JobItem | None:
+        if self._waiting is not None and self._row_of(self._waiting[0]) >= 0:
+            return self._waiting[0]
+        i = self._current_index()
+        return self.controller.items[i] if i >= 0 else None
+
+    def _paste_from_clipboard(self) -> None:
+        if isinstance(QApplication.focusWidget(), (QLineEdit, QAbstractSpinBox, QPlainTextEdit)):
+            return  # Ctrl+V dentro de un campo de texto es para ese campo
+        target = self._paste_target()
+        if target is None or self._exporting:
+            return
+        clip = QGuiApplication.clipboard()
+        mime = clip.mimeData()
+        path: Path | None = None
+        if mime is not None and mime.hasImage():
+            qimg = clip.image()
+            if not qimg.isNull():
+                if self._copied_digest is not None and self._digest(qimg) == self._copied_digest:
+                    self._info("Mejora con Gemini", MSG_SAME_IMAGE)
+                    return
+                folder = paths.data_dir() / "cache" / "external"
+                folder.mkdir(parents=True, exist_ok=True)
+                path = folder / f"clipboard_{time.strftime('%Y%m%d_%H%M%S')}_{id(qimg) % 1000}.png"
+                if not qimg.save(str(path), "PNG", 80):
+                    self._info("Mejora con Gemini", "No se pudo guardar la imagen pegada.")
+                    return
+        if path is None and mime is not None and mime.hasUrls():
+            for url in mime.urls():
+                local = Path(url.toLocalFile()) if url.isLocalFile() else None
+                if local is not None and local.suffix.lower() in SUPPORTED_EXTENSIONS:
+                    path = local
+                    break
+        if path is None:
+            self._info("Mejora con Gemini", MSG_NO_IMAGE)
+            return
+        if self._waiting is not None and self._waiting[0] is target:
+            self._stop_waiting()
+        self._on_external_dropped(path, target=target,
+                                  notice=f"Mejora pegada en «{target.path.name}»")
+
+    def _on_external_dropped(self, path: Path, target: JobItem | None = None,
+                             notice: str | None = None) -> None:
+        if self._exporting:
+            return
+        if target is None:
+            i = self._current_index()
+            if i < 0:
+                return
+            item = self.controller.items[i]
+        else:
+            item = target
+            i = self._row_of(item)
+            if i < 0:
+                return
+        if self._waiting is not None and self._waiting[0] is item:
+            self._stop_waiting()
         if self._enhancing is item:
             self._cancel_enhance.set()  # la versión de Gemini reemplaza la mejora automática
         self._enhance_queue = [it for it in self._enhance_queue if it is not item]
@@ -700,10 +826,11 @@ class JobPage(QWidget):
         self._attach_cancel = threading.Event()
         item.enhancing = True
         self.model.refresh(i)
-        self._show_diagnosis(i)
+        if i == self._current_index():
+            self._show_diagnosis(i)
         self._update_state()
         run_async(self._attach, item, Path(path),
-                  on_done=lambda res, it=item: self._attach_done(it, res),
+                  on_done=lambda res, it=item: self._attach_done(it, res, notice),
                   on_failed=lambda msg, it=item: self._attach_failed(it, msg), owner=self)
 
     def _attach(self, item: JobItem, path: Path):
@@ -716,11 +843,11 @@ class JobPage(QWidget):
         finally:
             item.enhancing = False
 
-    def _attach_done(self, item: JobItem, res) -> None:
+    def _attach_done(self, item: JobItem, res, notice: str | None = None) -> None:
         item.enhancing = False
         self._attaching = None
         self.inspector.set_enhance_choice(item.enhance_choice)
-        self._gemini_hint = None
+        self._gemini_hint = notice if res is not None else None
         self._show_original = False
         row = self._row_of(item)
         if row >= 0:

@@ -3,7 +3,6 @@ from PIL import Image
 from PySide6.QtCore import QMimeData, QPointF, Qt, QUrl
 from PySide6.QtGui import QDropEvent, QGuiApplication
 
-from printmaster.core.enhance.gemini_web import DEFAULT_PROMPT, GEMINI_URL
 from printmaster.domain.models import ItemStatus
 from printmaster.printers.profiles import load_profile
 from printmaster.ui.pages.job_page import JobPage
@@ -41,11 +40,12 @@ def load_respeto(page, qtbot, make_image, tmp_path):
 
 
 def test_gemini_button(page, qtbot, make_image, tmp_path):
-    src = load_respeto(page, qtbot, make_image, tmp_path)
+    load_respeto(page, qtbot, make_image, tmp_path)
     qtbot.mouseClick(page.quality.gemini_btn, Qt.LeftButton)
-    assert QGuiApplication.clipboard().text() == DEFAULT_PROMPT
-    assert page.opened == [GEMINI_URL] and page.revealed == [src]
-    assert "Prompt copiado" in page.next_label.text()
+    img = QGuiApplication.clipboard().image()  # 2C: se copia la imagen, no el prompt
+    assert (img.width(), img.height()) == (236, 420)
+    assert page.opened == [] and page.revealed == []  # modo escritorio por defecto
+    assert "Imagen copiada" in page.next_label.text()
 
 
 def test_drop_gemini_result(page, qtbot, make_image, tmp_path):

@@ -78,10 +78,10 @@ def test_approve_message_names_gemini(page, qtbot, make_image, tmp_path):
 def test_gemini_hint_clears_on_queue_change(page, qtbot, make_image, tmp_path):
     add_respeto(page, qtbot, make_image, tmp_path)
     qtbot.mouseClick(page.quality.gemini_btn, Qt.LeftButton)
-    assert "Prompt copiado" in page.next_label.text()
+    assert "Imagen copiada" in page.next_label.text()
     page.queue.list.setCurrentIndex(page.model.index(0))
     page.queue.remove_selected()
-    assert "Prompt copiado" not in page.next_label.text()
+    assert "Imagen copiada" not in page.next_label.text()
 
 
 def test_fits_at_697_without_scroll(qtbot, settings, make_image, tmp_path):
