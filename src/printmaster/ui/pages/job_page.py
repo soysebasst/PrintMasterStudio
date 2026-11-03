@@ -7,6 +7,7 @@ import subprocess
 import threading
 import time
 from collections import OrderedDict
+from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Qt, QThreadPool, QTimer, QUrl, Signal
@@ -15,6 +16,7 @@ from PySide6.QtWidgets import (
     QAbstractSpinBox,
     QApplication,
     QButtonGroup,
+    QDialog,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -37,14 +39,15 @@ from printmaster.core.enhance.installer import find_engine
 from printmaster.core.enhance.realesrgan import EnhanceCancelled
 from printmaster.core.image_loader import SUPPORTED_EXTENSIONS, load_proxy
 from printmaster.core.pdf_writer import ExportOptions
-from printmaster.core.pricing import format_cop
-from printmaster.domain.models import FitMode, ItemStatus
+from printmaster.core.pricing import format_cop, suggest_price
+from printmaster.domain.models import CropRect, FitMode, ItemStatus
 from printmaster.infra import paths
 from printmaster.infra.settings import FavoriteFormat, Settings
 from printmaster.printers.profiles import PrinterProfile
 from printmaster.ui.icons import icon
 from printmaster.ui.models.queue_model import QueueModel
 from printmaster.ui.qt_images import pil_to_qimage
+from printmaster.ui.widgets.crop_dialog import CropDialog
 from printmaster.ui.widgets.inspector import Inspector
 from printmaster.ui.widgets.preview_canvas import PreviewCanvas
 from printmaster.ui.widgets.quality_panel import QualityPanel
@@ -146,6 +149,12 @@ class JobPage(QWidget):
         self.enhanced_btn.setChecked(True)
         self.original_btn.setToolTip("Ver la imagen original")
         self.enhanced_btn.setToolTip("Ver la versión mejorada")
+        top_row.addSpacing(8)
+        self.crop_btn = QPushButton("  Recortar")
+        self.crop_btn.setIcon(icon("crop", size=18))
+        self.crop_btn.setToolTip("Elegir a mano qué parte de la imagen se imprime")
+        self.crop_btn.setEnabled(False)
+        top_row.addWidget(self.crop_btn)
         top_row.addStretch(1)
         self.zoom_out_btn = QPushButton()
         self.fit_btn = QPushButton()
@@ -248,6 +257,7 @@ class JobPage(QWidget):
         self.approve_btn.clicked.connect(self._approve_current)
         self.approve_all_btn.clicked.connect(self._approve_all)
         self.export_btn.clicked.connect(self._export)
+        self.crop_btn.clicked.connect(self._open_crop)
 
         self.favorite_saved = self.inspector.favorite_saved
         self._apply_params()
@@ -346,6 +356,7 @@ class JobPage(QWidget):
         self.approve_btn.setEnabled(
             cur >= 0 and items[cur].status in (ItemStatus.READY, ItemStatus.EXPORTED)
             and not busy)
+        self.crop_btn.setEnabled(cur >= 0 and items[cur].info is not None and not busy)
         has_enh = cur >= 0 and items[cur].uses_enhanced
         for b in (self.original_btn, self.enhanced_btn):
             b.setEnabled(has_enh)
@@ -360,7 +371,8 @@ class JobPage(QWidget):
             if self._show_original and items[cur].original_diagnosis is not None:
                 ppi = items[cur].original_diagnosis.effective_ppi
             self.info_label.setText(f"{w} × {h} cm" + (f" · {ppi:.0f} PPI efectivos"
-                                                        if ppi else ""))
+                                                        if ppi else "")
+                                    + ("" if items[cur].region.is_full else " · Recortada"))
             self.inspector.set_price(self.controller.price_for(cur))
         else:
             self.info_label.setText("")
@@ -514,8 +526,15 @@ class JobPage(QWidget):
             self.ppi_info.setText(str(exc))
             return
         src = self.controller.source_info(row)  # el plan está en píxeles de la fuente impresa
-        self.canvas.show_plan(qimg, plan, FitMode(self.controller.mode), self.profile,
-                              (src.width_px, src.height_px))
+        size = (src.width_px, src.height_px)
+        if not item.region.is_full:  # la vista previa trabaja sobre la zona recortada
+            rl, rt, rr, rb = item.region.box(*size)
+            pl, pt_, pr, pb = item.region.box(qimg.width(), qimg.height())
+            qimg = qimg.copy(pl, pt_, pr - pl, pb - pt_)
+            l, t, r, b = plan.src_box
+            plan = replace(plan, src_box=(l - rl, t - rt, r - rl, b - rt))
+            size = (rr - rl, rb - rt)
+        self.canvas.show_plan(qimg, plan, FitMode(self.controller.mode), self.profile, size)
         self._update_state()
 
     # --- aprobación y exportación ---------------------------------------------------
@@ -692,6 +711,56 @@ class JobPage(QWidget):
 
     def _set_compare(self, original: bool) -> None:
         self._show_original = original
+        self._redraw_current()
+        self._update_state()
+
+    # --- recorte manual --------------------------------------------------------------
+    def _run_crop_dialog(self, dlg: CropDialog) -> CropRect | None:
+        """Muestra el diálogo (sobrescribible en pruebas)."""
+        return dlg.crop_rect() if dlg.exec() == QDialog.Accepted else None
+
+    def _crop_presets(self, row: int) -> list[tuple[str, float | None]]:
+        info = self.controller.items[row].info
+        presets: list[tuple[str, float | None]] = [("Libre", None)]
+        if info is not None:
+            presets.append(("Original", info.width_px / info.height_px))
+        seen: set[float] = set()
+        for fav in self.settings.favorites:
+            w, h = float(fav.width), float(fav.height)
+            ratio = round(w / h, 4) if h else 0
+            if ratio and ratio not in seen:
+                seen.add(ratio)
+                presets.append((fav.name, w / h))
+        return presets
+
+    def _describe_crop(self, row: int, region: CropRect) -> str:
+        try:
+            plan = self.controller.plan_for(row, region=region)
+        except Exception as exc:  # noqa: BLE001
+            return str(exc)
+        w, h = (f"{(v / 10).normalize():f}".replace(".", ",")
+                for v in (plan.page_w_mm, plan.page_h_mm))
+        price = suggest_price(plan.page_w_mm, plan.page_h_mm, self.settings.pricing())
+        return f"{w} × {h} cm · {format_cop(price)} sugerido · {plan.effective_ppi:.0f} PPI"
+
+    def _open_crop(self) -> None:
+        row = self._current_index()
+        if row < 0 or self._exporting:
+            return
+        item = self.controller.items[row]
+        qimg = self._previews.get(self._preview_path(item))
+        if qimg is None:
+            return
+        dlg = CropDialog(qimg, item.region, self._crop_presets(row),
+                         lambda r, i=row: self._describe_crop(i, r), self)
+        region = self._run_crop_dialog(dlg)
+        dlg.deleteLater()
+        row = self._row_of(item)
+        if region is None or row < 0:
+            return
+        self.controller.set_region(row, region)
+        self.model.refresh(row)
+        self._show_diagnosis(row)
         self._redraw_current()
         self._update_state()
 
