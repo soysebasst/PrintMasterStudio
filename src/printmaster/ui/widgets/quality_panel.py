@@ -13,6 +13,7 @@ from printmaster.core.image_analyzer import Diagnosis
 from printmaster.core.image_loader import SUPPORTED_EXTENSIONS
 from printmaster.domain.models import ImageInfo
 from printmaster.domain.quality import QualityLevel
+from printmaster.ui.icons import icon
 from printmaster.ui.widgets.diagnosis_card import DiagnosisCard
 
 SHORT = {
@@ -83,7 +84,9 @@ class QualityPanel(QWidget):
         self.status_label.setWordWrap(True)
         self.status_label.setTextFormat(Qt.RichText)
         lay.addWidget(self.status_label)
-        self.gemini_btn = QPushButton("✦  Mejorar en Gemini")
+        self.gemini_btn = QPushButton("  Mejorar en Gemini")
+        self.gemini_btn.setProperty("primary", True)
+        self.gemini_btn.setIcon(icon("sparkles", "#ffffff", 18))
         self.gemini_btn.setToolTip("Copia el prompt, abre Gemini y la carpeta de la imagen")
         lay.addWidget(self.gemini_btn)
         self.drop_zone = DropZone()

@@ -2,22 +2,29 @@
 
 from __future__ import annotations
 
+from importlib import resources
+
+from PySide6.QtCore import QSize
 from PySide6.QtWidgets import (
     QHBoxLayout,
+    QLabel,
     QListWidget,
     QMainWindow,
     QScrollArea,
     QStackedWidget,
+    QVBoxLayout,
     QWidget,
 )
 
 from printmaster.infra.settings import FavoriteFormat, Settings, save_settings
 from printmaster.printers.profiles import load_profile
+from printmaster.ui.icons import icon
 from printmaster.ui.pages.home_page import HomePage
 from printmaster.ui.pages.job_page import JobPage
 from printmaster.ui.pages.settings_page import SettingsPage
 
 SECTIONS = ["Inicio", "Nuevo trabajo", "Configuración"]
+SECTION_ICONS = ["home", "photo-plus", "settings"]
 
 
 class MainWindow(QMainWindow):
@@ -33,13 +40,29 @@ class MainWindow(QMainWindow):
         lay = QHBoxLayout(central)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
+        sidebar = QWidget()
+        sidebar.setObjectName("sidebar")
+        side_lay = QVBoxLayout(sidebar)
+        side_lay.setContentsMargins(0, 0, 0, 0)
+        side_lay.setSpacing(0)
+        logo = resources.files("printmaster.ui").joinpath("assets/printmaster.png")
+        self.brand_label = QLabel(
+            f'<img src="{logo}" width="26" height="26" style="vertical-align:middle">'
+            '&nbsp; PrintMaster<br><span style="color:#b9a6ff; font-size:9pt;'
+            ' font-weight:400">Studio</span>')
+        self.brand_label.setObjectName("brand")
+        side_lay.addWidget(self.brand_label)
         self.nav = QListWidget()
         self.nav.setObjectName("nav")
+        self.nav.setIconSize(QSize(20, 20))
         self.nav.addItems(SECTIONS)
+        for i, name in enumerate(SECTION_ICONS):
+            self.nav.item(i).setIcon(icon(name, "#b9a6ff"))
+        side_lay.addWidget(self.nav, 1)
 
         self.pages = QStackedWidget()
         self.pages.setObjectName("pages")
-        lay.addWidget(self.nav)
+        lay.addWidget(sidebar)
         lay.addWidget(self.pages, 1)
         self.setCentralWidget(central)
 

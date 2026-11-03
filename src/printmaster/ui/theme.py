@@ -1,4 +1,4 @@
-"""Tema oscuro profesional (estilo Fusion + QSS)."""
+"""Tema oscuro violeta (estilo Fusion + QSS)."""
 
 from __future__ import annotations
 
@@ -12,12 +12,12 @@ def apply_dark_theme(app: QApplication) -> None:
     app.setStyle("Fusion")
     pal = QPalette()
     colors = {
-        QPalette.Window: "#1e1f22", QPalette.WindowText: "#e6e6e6",
-        QPalette.Base: "#2b2d31", QPalette.AlternateBase: "#25272b",
-        QPalette.Text: "#e6e6e6", QPalette.Button: "#2f3136",
-        QPalette.ButtonText: "#e6e6e6", QPalette.Highlight: "#2f6fdb",
-        QPalette.HighlightedText: "#ffffff", QPalette.ToolTipBase: "#2b2d31",
-        QPalette.ToolTipText: "#e6e6e6", QPalette.PlaceholderText: "#8a8f98",
+        QPalette.Window: "#15131c", QPalette.WindowText: "#ece9f5",
+        QPalette.Base: "#1d1a27", QPalette.AlternateBase: "#252134",
+        QPalette.Text: "#ece9f5", QPalette.Button: "#252134",
+        QPalette.ButtonText: "#ece9f5", QPalette.Highlight: "#7c5cff",
+        QPalette.HighlightedText: "#ffffff", QPalette.ToolTipBase: "#252134",
+        QPalette.ToolTipText: "#ece9f5", QPalette.PlaceholderText: "#7d7794",
     }
     for role, color in colors.items():
         pal.setColor(role, QColor(color))

@@ -35,6 +35,7 @@ from printmaster.domain.models import FitMode, ItemStatus
 from printmaster.infra import paths
 from printmaster.infra.settings import FavoriteFormat, Settings
 from printmaster.printers.profiles import PrinterProfile
+from printmaster.ui.icons import icon
 from printmaster.ui.models.queue_model import QueueModel
 from printmaster.ui.qt_images import pil_to_qimage
 from printmaster.ui.widgets.inspector import Inspector
@@ -123,13 +124,15 @@ class JobPage(QWidget):
         self.original_btn.setToolTip("Ver la imagen original")
         self.enhanced_btn.setToolTip("Ver la versión mejorada")
         top_row.addStretch(1)
-        self.zoom_out_btn = QPushButton("−")
-        self.fit_btn = QPushButton("⤢")
-        self.zoom_in_btn = QPushButton("+")
-        for b, tip in ((self.zoom_out_btn, "Alejar"), (self.fit_btn, "Ajustar a la vista"),
-                       (self.zoom_in_btn, "Acercar")):
+        self.zoom_out_btn = QPushButton()
+        self.fit_btn = QPushButton()
+        self.zoom_in_btn = QPushButton()
+        for b, tip, name in ((self.zoom_out_btn, "Alejar", "zoom-out"),
+                             (self.fit_btn, "Ajustar a la vista", "maximize"),
+                             (self.zoom_in_btn, "Acercar", "zoom-in")):
             b.setObjectName("iconButton")
             b.setToolTip(tip)
+            b.setIcon(icon(name, size=18))
             top_row.addWidget(b)
         center_lay.insertLayout(0, top_row)
         self.info_label = QLabel("")
@@ -190,6 +193,7 @@ class JobPage(QWidget):
         self.approve_all_btn = QPushButton("Aprobar todo")
         self.export_btn = QPushButton("Exportar PDF")
         self.export_btn.setProperty("primary", True)
+        self.export_btn.setIcon(icon("download", "#ffffff", 18))
         for b in (self.approve_all_btn, self.export_btn):
             bottom.addWidget(b)
         root.addWidget(footer)

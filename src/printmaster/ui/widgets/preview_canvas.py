@@ -37,7 +37,7 @@ class PreviewCanvas(QGraphicsView):
         super().__init__(parent)
         self.setScene(QGraphicsScene(self))
         self.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
-        self.setBackgroundBrush(QColor("#141517"))
+        self.setBackgroundBrush(QColor("#110f17"))
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
         self.setDragMode(QGraphicsView.NoDrag)
         self.page_item: QGraphicsRectItem | None = None
