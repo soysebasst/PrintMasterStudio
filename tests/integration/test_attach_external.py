@@ -89,3 +89,12 @@ def test_approve_all_includes_gemini_results_even_if_low(ctrl, tmp_path, make_im
     skipped = ctrl.approve_all()
     assert skipped == [1]  # la que no pasó por Gemini sigue pidiendo revisión individual
     assert ctrl.items[0].status.name == "APPROVED"
+
+
+def test_approve_all_skips_gemini_smaller_than_original(tmp_path, monkeypatch, make_image):
+    monkeypatch.setenv("PRINTMASTER_HOME", str(tmp_path / "home"))
+    c = JobController(Settings(output_dir=tmp_path / "out"), load_profile())
+    c.add_paths([make_image("big.jpg", size=(1200, 1800))])
+    c.analyze(0)
+    c.attach_external(0, gemini_png(tmp_path, (500, 750)))
+    assert c.approve_all() == [0]

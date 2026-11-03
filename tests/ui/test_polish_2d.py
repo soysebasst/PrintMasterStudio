@@ -98,3 +98,18 @@ def test_price_card_visible_and_follows_crop(page, qtbot, make_image, tmp_path):
     qtbot.mouseClick(page.crop_btn, Qt.LeftButton)
     assert page.quality.price_value.text() == "$10.000"
     assert "60 × 45 cm" in page.quality.price_detail.text()
+
+
+def test_use_original_instead_of_gemini(page, qtbot, make_image, tmp_path):
+    load(page, qtbot, make_image, tmp_path, (2000, 3000))
+    g = tmp_path / "g.png"
+    Image.new("RGB", (765, 1024), (240, 200, 120)).save(g)
+    page._on_external_dropped(g)
+    qtbot.waitUntil(lambda: page.controller.items[0].enhanced is not None, timeout=20000)
+    qtbot.waitUntil(lambda: page.quality.use_original_btn.isVisibleTo(page), timeout=5000)
+    qtbot.mouseClick(page.quality.use_original_btn, Qt.LeftButton)
+    item = page.controller.items[0]
+    assert not item.uses_enhanced
+    assert page.quality.use_original_btn.text().strip() == "Usar la de Gemini"
+    qtbot.mouseClick(page.quality.use_original_btn, Qt.LeftButton)
+    assert item.uses_enhanced

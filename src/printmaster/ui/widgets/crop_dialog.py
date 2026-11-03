@@ -35,6 +35,7 @@ class CropView(QWidget):
         super().__init__(parent)
         self._image = image
         self._r = [rect.x0, rect.y0, rect.x1, rect.y1]
+        self._last_valid = rect
         self._aspect: float | None = None  # ancho/alto en píxeles de la imagen
         self._grab: str | None = None
         self._press = QPointF()
@@ -46,7 +47,17 @@ class CropView(QWidget):
 
     # --- API ------------------------------------------------------------------------
     def crop_rect(self) -> CropRect:
-        return CropRect(*self._r)
+        try:
+            self._last_valid = CropRect(*self._r)
+        except ValueError:  # nunca debería pasar; se conserva el último marco válido
+            self._r = [self._last_valid.x0, self._last_valid.y0,
+                       self._last_valid.x1, self._last_valid.y1]
+        return self._last_valid
+
+    def aspect_possible(self, ratio_px: float) -> bool:
+        """Si cabe en la imagen un marco con esa proporción sin quedar demasiado angosto."""
+        norm = ratio_px * self._image.height() / self._image.width()
+        return min(norm, 1 / norm) >= MIN_CROP_FRACTION * 2
 
     def set_crop_rect(self, rect: CropRect) -> None:
         self._r = [rect.x0, rect.y0, rect.x1, rect.y1]
@@ -76,19 +87,16 @@ class CropView(QWidget):
         return self._aspect * self._image.height() / self._image.width()
 
     def _fit_aspect(self) -> None:
-        """El marco más grande con la proporción pedida, centrado en el actual."""
+        """El marco más grande con la proporción pedida que cabe en la imagen, centrado
+        donde estaba el actual."""
         a = self._norm_aspect()
         x0, y0, x1, y1 = self._r
         cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
-        w, h = x1 - x0, y1 - y0
-        if w / h > a:
-            w = h * a
-        else:
-            h = w / a
-        if w > 1.0:
-            w, h = 1.0, 1.0 / a
+        w, h = (1.0, 1.0 / a) if a >= 1.0 else (a, 1.0)
         if h > 1.0:
             w, h = a, 1.0
+        if w > 1.0:
+            w, h = 1.0, 1.0 / a
         cx = min(max(cx, w / 2), 1 - w / 2)
         cy = min(max(cy, h / 2), 1 - h / 2)
         self._r = [cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2]
@@ -147,8 +155,17 @@ class CropView(QWidget):
                 w = h * a
             else:
                 h = w / a
-            x0, x1 = (x1 - w, x1) if "l" in g else (x0, x0 + w)
-            y0, y1 = (y1 - h, y1) if "t" in g else (y0, y0 + h)
+            if w < m or h < m:  # no achicar por debajo del mínimo
+                k = max(m / w, m / h)
+                w, h = w * k, h * k
+            ax, ay = self._start[2] if "l" in g else self._start[0], \
+                self._start[3] if "t" in g else self._start[1]
+            room_w = ax if "l" in g else 1.0 - ax
+            room_h = ay if "t" in g else 1.0 - ay
+            if w > room_w + 1e-9 or h > room_h + 1e-9:
+                return  # el marco mínimo no cabe desde esta esquina: se deja como estaba
+            x0, x1 = (ax - w, ax) if "l" in g else (ax, ax + w)
+            y0, y1 = (ay - h, ay) if "t" in g else (ay, ay + h)
         self._r = [x0, y0, x1, y1]
 
     def _emit(self) -> None:
@@ -173,7 +190,7 @@ class CropView(QWidget):
             self.setCursor(cursors.get(hit or "", Qt.ArrowCursor))
             return
         self._apply_drag(event.position())
-        self.update()
+        self._emit()  # tamaño y precio en vivo mientras se arrastra
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
         if self._grab is not None:
@@ -268,6 +285,10 @@ class CropDialog(QDialog):
         lay.addLayout(chips)
         self.view = CropView(image, rect)
         lay.addWidget(self.view, 1)
+        for (label, ratio) in presets:
+            if ratio is not None and not self.view.aspect_possible(ratio):
+                self.preset_buttons[label].setEnabled(False)
+                self.preset_buttons[label].setToolTip("Esta proporción no cabe en la imagen")
         bottom = QHBoxLayout()
         self.info_label = QLabel("")
         self.info_label.setObjectName("priceLabel")

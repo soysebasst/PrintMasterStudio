@@ -40,7 +40,7 @@ from printmaster.core.enhance.realesrgan import EnhanceCancelled
 from printmaster.core.image_loader import SUPPORTED_EXTENSIONS, load_proxy
 from printmaster.core.pdf_writer import ExportOptions
 from printmaster.core.pricing import format_cop, suggest_price
-from printmaster.domain.models import CropRect, FitMode, ItemStatus
+from printmaster.domain.models import CropRect, EnhanceChoice, FitMode, ItemStatus
 from printmaster.infra import paths
 from printmaster.infra.settings import FavoriteFormat, Settings
 from printmaster.printers.profiles import PrinterProfile
@@ -265,6 +265,7 @@ class JobPage(QWidget):
         self.approve_all_btn.clicked.connect(self._approve_all)
         self.export_btn.clicked.connect(self._export)
         self.crop_btn.clicked.connect(self._open_crop)
+        self.quality.use_original_btn.clicked.connect(self._toggle_use_original)
 
         self.favorite_saved = self.inspector.favorite_saved
         self._apply_params()
@@ -364,6 +365,11 @@ class JobPage(QWidget):
             cur >= 0 and items[cur].status in (ItemStatus.READY, ItemStatus.EXPORTED)
             and not busy)
         self.crop_btn.setEnabled(cur >= 0 and items[cur].info is not None and not busy)
+        has_version = cur >= 0 and items[cur].enhanced is not None and not items[cur].enhancing
+        self.quality.use_original_btn.setVisible(has_version)
+        if has_version:
+            self.quality.use_original_btn.setText(
+                "Usar la original" if items[cur].uses_enhanced else "Usar la de Gemini")
         has_enh = cur >= 0 and items[cur].uses_enhanced
         for b in (self.original_btn, self.enhanced_btn):
             b.setEnabled(has_enh)
@@ -721,6 +727,15 @@ class JobPage(QWidget):
         self._show_diagnosis(i)
         self._redraw_current()
         self._update_state()
+
+    def _toggle_use_original(self) -> None:
+        i = self._current_index()
+        if i < 0 or self.controller.items[i].enhanced is None:
+            return
+        item = self.controller.items[i]
+        choice = EnhanceChoice.OFF if item.uses_enhanced else EnhanceChoice.AUTO
+        self.inspector.set_enhance_choice(choice)
+        self._on_enhance_choice(choice)
 
     def _set_compare(self, original: bool) -> None:
         self._show_original = original

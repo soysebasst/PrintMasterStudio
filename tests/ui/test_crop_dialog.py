@@ -88,3 +88,48 @@ def test_dialog_presets_reset_and_describe(qtbot):
     assert dlg.info_label.text() == describe(r)
     qtbot.mouseClick(dlg.reset_btn, Qt.LeftButton)
     assert dlg.crop_rect().is_full
+
+
+def big_view(qtbot, w, h):
+    v = CropView(image(w // 10, h // 10), CropRect())
+    v._image = image(w // 10, h // 10)
+    qtbot.addWidget(v)
+    v.resize(600, 400)
+    v.show()
+    return v
+
+
+def test_locked_corner_drag_never_below_minimum(qtbot):
+    from printmaster.domain.models import MIN_CROP_FRACTION
+    v = big_view(qtbot, 1500, 1000)
+    v.set_aspect(600 / 900)
+    r = v.crop_rect()
+    drag(qtbot, v, pt(v, r.x1, r.y1), pt(v, 0.0, 0.0))
+    r = v.crop_rect()
+    assert r.x1 - r.x0 >= MIN_CROP_FRACTION and r.y1 - r.y0 >= MIN_CROP_FRACTION
+    assert (r.x1 - r.x0) * 150 == pytest.approx((r.y1 - r.y0) * 100 * 600 / 900, rel=0.05)
+
+
+def test_toggling_presets_keeps_largest_frame(view):
+    for _ in range(6):
+        view.set_aspect(2.0)
+        view.set_aspect(0.5)
+    view.set_aspect(1.0)
+    r = view.crop_rect()
+    assert r.y1 - r.y0 == pytest.approx(1.0)  # 200x200 dentro de 400x200: alto completo
+
+
+def test_impossible_preset_is_disabled(qtbot):
+    dlg = CropDialog(image(1000, 50), CropRect(), [("Libre", None), ("Angosto", 0.3)],
+                     lambda r: "")
+    qtbot.addWidget(dlg)
+    assert not dlg.preset_buttons["Angosto"].isEnabled()
+
+
+def test_live_update_while_dragging(view, qtbot):
+    seen = []
+    view.changed.connect(seen.append)
+    qtbot.mousePress(view, Qt.LeftButton, pos=pt(view, 1, 1))
+    qtbot.mouseMove(view, pt(view, 0.6, 0.6))
+    assert seen  # el tamaño y el precio se actualizan sin soltar
+    qtbot.mouseRelease(view, Qt.LeftButton, pos=pt(view, 0.6, 0.6))

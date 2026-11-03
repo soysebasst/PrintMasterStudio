@@ -478,13 +478,21 @@ class JobController:
         if item.status in (ItemStatus.READY, ItemStatus.EXPORTED, ItemStatus.APPROVED):
             item.status = ItemStatus.APPROVED
 
+    @staticmethod
+    def _better_version(item: JobItem) -> bool:
+        """Se imprime una versión de Gemini con más píxeles que la original."""
+        if not item.uses_enhanced or item.info is None or item.enhanced_info is None:
+            return False
+        e, o = item.enhanced_info, item.info
+        return max(e.width_px, e.height_px) > max(o.width_px, o.height_px)
+
     def approve_all(self) -> list[int]:
         skipped: list[int] = []
         for i, item in enumerate(self.items):
             if item.status != ItemStatus.READY:
                 continue
             if item.diagnosis is None or (item.diagnosis.level in _LOW_LEVELS
-                                          and not item.uses_enhanced):
+                                          and not self._better_version(item)):
                 # una mejora de Gemini ya es la mejor versión disponible: se aprueba
                 skipped.append(i)
                 continue
