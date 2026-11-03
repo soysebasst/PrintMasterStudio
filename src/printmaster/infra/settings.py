@@ -7,10 +7,11 @@ import logging
 import os
 from decimal import Decimal
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, Field, ValidationError
 
-from printmaster.core.enhance.gemini_web import DEFAULT_PROMPT
+from printmaster.core.enhance.gemini_web import DEFAULT_PROMPT, GEMINI_URL
 from printmaster.core.pricing import PricingConfig
 from printmaster.domain.models import FitMode, Orientation
 from printmaster.domain.units import Unit
@@ -53,6 +54,9 @@ class Settings(BaseModel):
     enhance_enabled: bool = True
     enhance_target_ppi: int = Field(150, ge=72, le=300)
     gemini_prompt: str = DEFAULT_PROMPT
+    gemini_open_mode: Literal["desktop", "web"] = "desktop"
+    gemini_url: str = GEMINI_URL
+    downloads_dir: Path = Field(default_factory=lambda: Path.home() / "Downloads")
     advanced_open: bool = False
     printer_id: str = "epson_sc_t3170"
     naming_prefix: str = "Cliente"
