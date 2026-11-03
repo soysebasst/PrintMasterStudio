@@ -48,7 +48,7 @@ MSG_BLUR = "Posible desenfoque."
 MSG_NOISE = "Ruido visible."
 MSG_BLOCKS = "Artefactos de compresión JPEG."
 REC_KEEP = "Conservar la imagen original."
-REC_UPSCALE = "Se recomienda ampliar (Fase 3) o reducir el tamaño de impresión."
+REC_UPSCALE = "Mejórela con Gemini o reduzca el tamaño de impresión."
 REC_REVIEW = "Revisar la vista previa antes de aprobar."
 
 
