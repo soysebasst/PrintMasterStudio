@@ -42,6 +42,7 @@ from printmaster.domain.models import (
     Background,
     BackgroundKind,
     CropOffset,
+    CropRect,
     EnhanceChoice,
     FitMode,
     ImageInfo,
@@ -68,6 +69,7 @@ class JobItem:
     status: ItemStatus = ItemStatus.PENDING
     diagnosis: Diagnosis | None = None
     crop: CropOffset = CropOffset()
+    region: CropRect = CropRect()  # recorte manual (fracciones de la imagen)
     duplicate_of: int | None = None
     error: str | None = None
     output: Path | None = None
@@ -190,7 +192,7 @@ class JobController:
         # El PPI efectivo no depende del fondo: se planifica con fondo blanco para no
         # decodificar la imagen (el color de borde requiere leerla).
         p = make_plan(self.source_info(i), self.spec, self.mode, Background(), item.crop,
-                      self.settings.length_step_mm, self._aspect(i))
+                      self.settings.length_step_mm, self._aspect(i), item.region)
         item.diagnosis = rerate(base, p.effective_ppi)
 
     def _aspect(self, i: int) -> tuple[int, int] | None:
@@ -219,6 +221,14 @@ class JobController:
             self.background = bg
             self._revoke_approvals()
 
+    def set_region(self, i: int, region: CropRect) -> None:
+        """Recorte manual: cambia el largo automático, el precio y el PPI efectivo."""
+        item = self.items[i]
+        if region != item.region:
+            item.region = region
+            item.crop = CropOffset()  # el desplazamiento de «Recortar» era de la zona anterior
+            self._revoke_approvals([i])
+
     def set_crop(self, i: int, crop: CropOffset) -> None:
         if crop != self.items[i].crop:
             self.items[i].crop = crop
@@ -244,12 +254,13 @@ class JobController:
 
     def _page_spec(self, i: int, spec: PrintSpec, mode: FitMode, step: int) -> PrintSpec:
         """Formato de página ya resuelto para el ítem (largo automático incluido)."""
-        w, h = page_size_mm(self.source_info(i), spec, mode, step, self._aspect(i))
+        w, h = page_size_mm(self.source_info(i), spec, mode, step, self._aspect(i),
+                            self.items[i].region)
         return replace(spec, width_mm=w, height_mm=h)
 
     def page_size_for(self, i: int) -> tuple[Decimal, Decimal]:
         return page_size_mm(self.source_info(i), self.spec, self.mode,
-                            self.settings.length_step_mm, self._aspect(i))
+                            self.settings.length_step_mm, self._aspect(i), self.items[i].region)
 
     def has_errors(self, i: int) -> bool:
         return any(x.level == "error" for x in self.issues(i))
@@ -288,7 +299,7 @@ class JobController:
                          self.export_options, self.settings.length_step_mm)
 
     def plan_for(self, i: int, params: JobParams | None = None,
-                 crop: CropOffset | None = None) -> RenderPlan:
+                 crop: CropOffset | None = None, region: CropRect | None = None) -> RenderPlan:
         item = self.items[i]
         if item.info is None:
             raise ValueError(item.error or "La imagen no se pudo leer.")
@@ -296,7 +307,7 @@ class JobController:
         bg = self._resolved_background(item, params.background)
         return make_plan(self.source_info(i), params.spec, params.mode, bg,
                          crop if crop is not None else item.crop, params.length_step_mm,
-                         self._aspect(i))
+                         self._aspect(i), region if region is not None else item.region)
 
     # --- diagnóstico y aprobación ---------------------------------------------------
     def analyze(self, i: int) -> Diagnosis:
@@ -311,7 +322,7 @@ class JobController:
             log.warning("%s", exc)
             raise
         orig_ppi = make_plan(item.info, self.spec, self.mode, Background(), item.crop,
-                             self.settings.length_step_mm).effective_ppi
+                             self.settings.length_step_mm, region=item.region).effective_ppi
         item.original_diagnosis = analyze_image(item.info, proxy, orig_ppi)
         item.diagnosis = item.original_diagnosis
         # Los parámetros pudieron cambiar durante el análisis: calificar con los actuales.
@@ -329,7 +340,7 @@ class JobController:
         item = self.items[i]
         assert item.info is not None
         return make_plan(item.info, self.spec, self.mode, Background(), item.crop,
-                         self.settings.length_step_mm).effective_ppi
+                         self.settings.length_step_mm, region=item.region).effective_ppi
 
     def needs_enhancement(self, i: int) -> int:
         """Pasadas ×4 necesarias (0 = no mejorar)."""
@@ -369,7 +380,8 @@ class JobController:
             result = enhancer.enhance(item.path, info.sha256, passes, model, cancel, progress)
             einfo = probe(result.path)
             plan_e = make_plan(einfo, self.spec, self.mode, Background(), item.crop,
-                               self.settings.length_step_mm, (info.width_px, info.height_px))
+                               self.settings.length_step_mm, (info.width_px, info.height_px),
+                               item.region)
             if item.enhance_gen != gen:
                 # Mientras tanto se adjuntó una mejora externa (Gemini): no se sobrescribe.
                 return item.enhanced  # type: ignore[return-value]
@@ -426,7 +438,7 @@ class JobController:
 
         def ppi_of(info: ImageInfo) -> float:
             return make_plan(info, self.spec, self.mode, Background(), item.crop,
-                             self.settings.length_step_mm, aspect).effective_ppi
+                             self.settings.length_step_mm, aspect, item.region).effective_ppi
 
         result = EnhanceResult(copy, "gemini-web", 0, ENGINE_GEMINI)
         final_info = ext_info
@@ -466,12 +478,22 @@ class JobController:
         if item.status in (ItemStatus.READY, ItemStatus.EXPORTED, ItemStatus.APPROVED):
             item.status = ItemStatus.APPROVED
 
+    @staticmethod
+    def _better_version(item: JobItem) -> bool:
+        """Se imprime una versión de Gemini con más píxeles que la original."""
+        if not item.uses_enhanced or item.info is None or item.enhanced_info is None:
+            return False
+        e, o = item.enhanced_info, item.info
+        return max(e.width_px, e.height_px) > max(o.width_px, o.height_px)
+
     def approve_all(self) -> list[int]:
         skipped: list[int] = []
         for i, item in enumerate(self.items):
             if item.status != ItemStatus.READY:
                 continue
-            if item.diagnosis is None or item.diagnosis.level in _LOW_LEVELS:
+            if item.diagnosis is None or (item.diagnosis.level in _LOW_LEVELS
+                                          and not self._better_version(item)):
+                # una mejora de Gemini ya es la mejor versión disponible: se aprueba
                 skipped.append(i)
                 continue
             item.status = ItemStatus.APPROVED
@@ -501,10 +523,10 @@ class JobController:
         today = today or date.today()
         targets = list(indices) if indices is not None else [
             i for i, it in enumerate(self.items) if it.status == ItemStatus.APPROVED]
-        jobs = [(i, self.items[i], self.items[i].crop) for i in targets]
+        jobs = [(i, self.items[i], self.items[i].crop, self.items[i].region) for i in targets]
         results: list[ExportResult] = []
         total = len(jobs)
-        for k, (i, item, crop) in enumerate(jobs):
+        for k, (i, item, crop, region) in enumerate(jobs):
             i = self._index_of(item, i)
             try:
                 if item.info is None:
@@ -515,7 +537,7 @@ class JobController:
                 if own_errors:
                     raise ValueError(own_errors[0].message)
                 out = unique_path(output_path(out_dir, k, item.path, params.naming, today))
-                write_pdf(self.source_info(i), self.plan_for(i, params, crop), out,
+                write_pdf(self.source_info(i), self.plan_for(i, params, crop, region), out,
                           params.export_options)
             except (PdfExportError, ImageLoadError, ValueError, OSError) as exc:
                 item.status = ItemStatus.ERROR

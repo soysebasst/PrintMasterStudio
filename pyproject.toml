@@ -58,6 +58,7 @@ ignore = ["E741"]
 extend-immutable-calls = [
   "printmaster.domain.models.Background",
   "printmaster.domain.models.CropOffset",
+  "printmaster.domain.models.CropRect",
   "printmaster.core.pdf_writer.ExportOptions",
   "printmaster.core.naming.NamingOptions",
   "printmaster.domain.quality.QualityThresholds",

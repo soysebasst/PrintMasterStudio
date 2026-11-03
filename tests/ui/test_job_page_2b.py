@@ -42,6 +42,7 @@ def load_respeto(page, qtbot, make_image, tmp_path):
 def test_gemini_button(page, qtbot, make_image, tmp_path):
     load_respeto(page, qtbot, make_image, tmp_path)
     qtbot.mouseClick(page.quality.gemini_btn, Qt.LeftButton)
+    qtbot.waitUntil(lambda: page._copying is None, timeout=10000)
     img = QGuiApplication.clipboard().image()  # 2C: se copia la imagen, no el prompt
     assert (img.width(), img.height()) == (236, 420)
     assert page.opened == [] and page.revealed == []  # modo escritorio por defecto

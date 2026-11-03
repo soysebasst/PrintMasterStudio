@@ -30,6 +30,12 @@
 - Estilo morado con iconos SVG, marca en la barra lateral e Inicio con favoritos en botones
 - Checklist: `docs/acceptance/aceptacion.md` (sección Fase 2C)
 
+## Fase 2D — implementada (pendiente de validación en Windows)
+- Recorte manual estilo celular (libre o con proporción), con largo y precio en vivo
+- Solo Gemini: sin mejora local automática ni Real-ESRGAN (código conservado y desactivado)
+- Copia para Gemini en segundo plano (PNG/TIFF grandes); aviso si el resultado llega reducido
+- Cuadro de precio sugerido en el panel; «Aprobar todo» acepta las mejoradas con Gemini
+
 ## Siguiente
 - Fase 2: procesamiento por lotes en segundo plano con pool de procesos, pausa/reanudar/cancelar,
   persistencia en SQLite, historial y regeneración, registro de errores visible

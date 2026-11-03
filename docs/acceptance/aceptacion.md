@@ -164,3 +164,33 @@ git pull
 | ¿Ctrl+V funcionó desde la app de escritorio de Gemini? | |
 | ¿El nuevo estilo se ve bien? | |
 | Comentarios | |
+
+
+---
+
+# Fase 2D — recorte manual, solo Gemini y precio a la vista
+
+## 1. Actualizar
+
+```powershell
+cd C:\PrintMaster
+git pull
+.venv\Scripts\pip install -e ".[dev]"
+```
+
+## 2. Probar
+
+- [ ] Carga una imagen: ya no se mejora sola y no aparece «Mejora: Automática».
+- [ ] Debajo de la zona de Gemini se ve el cuadro **Precio sugerido** con el tamaño de la lámina.
+- [ ] Pulsa **Recortar**, deja «Libre», sube el borde de abajo y mira cómo cambian el largo y el precio. **Aplicar recorte**: la vista previa, la tarjeta y el total cambian.
+- [ ] Recorta con la proporción «60 × 90 cm»: la lámina debe quedar exactamente en 60 × 90.
+- [ ] **Restablecer** vuelve a la imagen completa.
+- [ ] Copia para Gemini una imagen PNG grande: la app no se congela («Copiando imagen…»).
+- [ ] Pega con Ctrl+V una imagen copiada de Gemini: debe avisar que es una copia reducida. Descárgala y compara.
+- [ ] Exporta una recortada e imprímela a «Tamaño real».
+
+| Dato | Valor |
+|---|---|
+| ¿El recorte es cómodo? | |
+| ¿El precio se entiende a simple vista? | |
+| Comentarios | |

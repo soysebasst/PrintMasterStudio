@@ -6,7 +6,15 @@ from decimal import Decimal
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QFileDialog,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 from printmaster.core.enhance.enhancer import ENGINE_AI, EnhanceResult
 from printmaster.core.image_analyzer import Diagnosis
@@ -120,10 +128,34 @@ class QualityPanel(QWidget):
         lay.addWidget(self.paste_btn)
         self.drop_zone = DropZone()
         lay.addWidget(self.drop_zone)
+        self.use_original_btn = QPushButton("Usar la original")
+        self.use_original_btn.setObjectName("linkButton")
+        self.use_original_btn.setToolTip("Elegir qué versión se imprime y se cobra")
+        self.use_original_btn.setVisible(False)
+        lay.addWidget(self.use_original_btn)
         self.note_label = QLabel(GEMINI_NOTE)
         self.note_label.setWordWrap(True)
         self.note_label.setObjectName("hint")
         lay.addWidget(self.note_label)
+        self.price_card = QFrame()
+        self.price_card.setObjectName("card")
+        pc = QHBoxLayout(self.price_card)
+        pc.setContentsMargins(12, 8, 12, 8)
+        col = QVBoxLayout()
+        col.setSpacing(0)
+        caption = QLabel("Precio sugerido")
+        caption.setObjectName("hint")
+        col.addWidget(caption)
+        self.price_detail = QLabel("")
+        self.price_detail.setObjectName("muted")
+        col.addWidget(self.price_detail)
+        pc.addLayout(col, 1)
+        self.price_value = QLabel("")
+        self.price_value.setObjectName("priceValue")
+        self.price_value.setStyleSheet("color:#7ee7a8; font-size:16pt; font-weight:700;")
+        pc.addWidget(self.price_value)
+        self.price_card.setVisible(False)
+        lay.addWidget(self.price_card)
         self.choice_row = QHBoxLayout()
         lay.addLayout(self.choice_row)
         self.actions_row = QHBoxLayout()
@@ -136,6 +168,12 @@ class QualityPanel(QWidget):
         self.details = DiagnosisCard()
         self.details.setVisible(False)
         lay.addWidget(self.details)
+
+    def set_price(self, price_text: str | None, detail: str = "") -> None:
+        """Cuadro de precio sugerido de la imagen seleccionada (oculto si no hay)."""
+        self.price_card.setVisible(price_text is not None)
+        self.price_value.setText(price_text or "")
+        self.price_detail.setText(detail)
 
     def set_waiting(self, name: str | None, *, show_copy_prompt: bool = False) -> None:
         """Muestra u oculta el estado «Esperando descarga de Gemini…»."""
@@ -190,7 +228,7 @@ class QualityPanel(QWidget):
         self.status_label.setText(status)
         self.status_label.setVisible(bool(status))
         has_item = info is not None
-        for w in (self.gemini_btn, self.drop_zone):
+        for w in (self.gemini_btn, self.paste_btn, self.drop_zone):
             w.setEnabled(has_item)
         self.details.show_diagnosis(diag, info, downsample_ppi, error, price=price,
                                     page_mm=page_mm, enhanced=enhanced, enhancing=enhancing)

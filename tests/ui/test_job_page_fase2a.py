@@ -14,7 +14,8 @@ pytestmark = pytest.mark.ui
 @pytest.fixture
 def page(qtbot, settings, fake_engine_cmd, tmp_path):
     p = JobPage(settings, load_profile(),
-                enhancer=Enhancer(RealEsrgan(fake_engine_cmd), tmp_path / "cache"))
+                enhancer=Enhancer(RealEsrgan(fake_engine_cmd), tmp_path / "cache"),
+                local_enhance=True)
     qtbot.addWidget(p)
     p.resize(1300, 800)
     p.show()
@@ -65,7 +66,8 @@ def test_cancel_enhance(page, qtbot, make_image, tmp_path, monkeypatch):
 def test_no_enhance_when_disabled(qtbot, settings, fake_engine_cmd, tmp_path, make_image):
     settings.enhance_enabled = False
     p = JobPage(settings, load_profile(),
-                enhancer=Enhancer(RealEsrgan(fake_engine_cmd), tmp_path / "cache"))
+                enhancer=Enhancer(RealEsrgan(fake_engine_cmd), tmp_path / "cache"),
+                local_enhance=True)
     qtbot.addWidget(p)
     drop(p, [make_image("r.jpg", size=(236, 420), folder=tmp_path / "in")])
     qtbot.waitUntil(lambda: p.controller.items[0].status == ItemStatus.READY, timeout=10000)

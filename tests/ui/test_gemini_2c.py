@@ -48,6 +48,7 @@ def gemini_image(w=2304, h=4096) -> QImage:
 def test_gemini_copies_image_and_waits_desktop(page, qtbot, make_image, tmp_path):
     load(page, qtbot, make_image, tmp_path, [("a.jpg", (236, 420))])
     qtbot.mouseClick(page.quality.gemini_btn, Qt.LeftButton)
+    qtbot.waitUntil(lambda: page._copying is None, timeout=10000)
     img = QGuiApplication.clipboard().image()
     assert (img.width(), img.height()) == (236, 420)
     assert page.opened == [] and page.revealed == []
@@ -59,6 +60,7 @@ def test_gemini_copies_image_and_waits_desktop(page, qtbot, make_image, tmp_path
 def test_gemini_caps_long_side(page, qtbot, make_image, tmp_path):
     load(page, qtbot, make_image, tmp_path, [("big.png", (4000, 1000))])
     qtbot.mouseClick(page.quality.gemini_btn, Qt.LeftButton)
+    qtbot.waitUntil(lambda: page._copying is None, timeout=10000)
     img = QGuiApplication.clipboard().image()
     assert (img.width(), img.height()) == (3072, 768)
 
@@ -68,6 +70,7 @@ def test_gemini_web_mode_opens_url(page, qtbot, make_image, tmp_path):
     page.settings.gemini_url = "https://gemini.google.com/gem/abc123"
     load(page, qtbot, make_image, tmp_path, [("a.jpg", (236, 420))])
     qtbot.mouseClick(page.quality.gemini_btn, Qt.LeftButton)
+    qtbot.waitUntil(lambda: page._copying is None, timeout=10000)
     assert page.opened == ["https://gemini.google.com/gem/abc123"]
     assert not page.quality.copy_prompt_btn.isVisibleTo(page)  # hay un Gem
 
@@ -75,6 +78,7 @@ def test_gemini_web_mode_opens_url(page, qtbot, make_image, tmp_path):
 def test_copy_prompt_visible_without_gem(page, qtbot, make_image, tmp_path):
     load(page, qtbot, make_image, tmp_path, [("a.jpg", (236, 420))])
     qtbot.mouseClick(page.quality.gemini_btn, Qt.LeftButton)
+    qtbot.waitUntil(lambda: page._copying is None, timeout=10000)
     assert page.quality.copy_prompt_btn.isVisibleTo(page)
     qtbot.mouseClick(page.quality.copy_prompt_btn, Qt.LeftButton)
     assert QGuiApplication.clipboard().text() == page.settings.gemini_prompt
@@ -83,6 +87,7 @@ def test_copy_prompt_visible_without_gem(page, qtbot, make_image, tmp_path):
 def test_download_attaches_to_waiting_item(page, qtbot, make_image, tmp_path):
     load(page, qtbot, make_image, tmp_path, [("a.jpg", (236, 420)), ("b.jpg", (300, 300))])
     qtbot.mouseClick(page.quality.gemini_btn, Qt.LeftButton)
+    qtbot.waitUntil(lambda: page._copying is None, timeout=10000)
     page.queue.list.setCurrentIndex(page.model.index(1))  # el usuario cambia de imagen
     Image.new("RGB", (2304, 4096), (240, 200, 120)).save(page.settings.downloads_dir / "g.png")
     page._poll_downloads()
@@ -96,6 +101,7 @@ def test_download_attaches_to_waiting_item(page, qtbot, make_image, tmp_path):
 def test_stop_waiting(page, qtbot, make_image, tmp_path):
     load(page, qtbot, make_image, tmp_path, [("a.jpg", (236, 420))])
     qtbot.mouseClick(page.quality.gemini_btn, Qt.LeftButton)
+    qtbot.waitUntil(lambda: page._copying is None, timeout=10000)
     qtbot.mouseClick(page.quality.stop_wait_btn, Qt.LeftButton)
     assert page._waiting is None and not page._watch_timer.isActive()
     assert not page.quality.wait_label.isVisibleTo(page)
@@ -104,6 +110,7 @@ def test_stop_waiting(page, qtbot, make_image, tmp_path):
 def test_wait_expires(page, qtbot, make_image, tmp_path):
     load(page, qtbot, make_image, tmp_path, [("a.jpg", (236, 420))])
     qtbot.mouseClick(page.quality.gemini_btn, Qt.LeftButton)
+    qtbot.waitUntil(lambda: page._copying is None, timeout=10000)
     item, started = page._waits[0]
     page._waits[0] = (item, started - WAIT_TIMEOUT_S - 1)
     page._poll_downloads()
@@ -146,6 +153,7 @@ def test_paste_local_file_url(page, qtbot, make_image, tmp_path):
 def test_ctrl_v_with_original_still_copied(page, qtbot, make_image, tmp_path):
     load(page, qtbot, make_image, tmp_path, [("a.jpg", (236, 420))])
     qtbot.mouseClick(page.quality.gemini_btn, Qt.LeftButton)
+    qtbot.waitUntil(lambda: page._copying is None, timeout=10000)
     qtbot.mouseClick(page.quality.paste_btn, Qt.LeftButton)
     assert any("todavía tiene la imagen original" in m for m in page.messages)
     assert page.controller.items[0].enhanced is None and page._attaching is None
@@ -186,6 +194,7 @@ def test_waiting_panel_does_not_widen(qtbot, settings, make_image, tmp_path):
     qtbot.wait(200)
     before = sa.widget().minimumSizeHint().width()  # depende de las fuentes de cada sistema
     qtbot.mouseClick(page.quality.gemini_btn, Qt.LeftButton)
+    qtbot.waitUntil(lambda: page._copying is None, timeout=10000)
     qtbot.wait(200)
     assert page.quality.wait_label.isVisibleTo(page)
     assert sa.widget().minimumSizeHint().width() <= before  # esperar no ensancha el panel
@@ -195,8 +204,10 @@ def test_fifo_waits_attach_in_order(page, qtbot, make_image, tmp_path):
     load(page, qtbot, make_image, tmp_path, [("a.jpg", (236, 420)), ("b.jpg", (300, 300))])
     a, b = page.controller.items
     qtbot.mouseClick(page.quality.gemini_btn, Qt.LeftButton)
+    qtbot.waitUntil(lambda: page._copying is None, timeout=10000)
     page.queue.list.setCurrentIndex(page.model.index(1))
     qtbot.mouseClick(page.quality.gemini_btn, Qt.LeftButton)
+    qtbot.waitUntil(lambda: page._copying is None, timeout=10000)
     assert [it for it, _ in page._waits] == [a, b]
     Image.new("RGB", (2304, 4096), (240, 200, 120)).save(page.settings.downloads_dir / "1.png")
     page._poll_downloads()
@@ -213,6 +224,7 @@ def test_fifo_waits_attach_in_order(page, qtbot, make_image, tmp_path):
 def test_download_during_export_keeps_waiting(page, qtbot, make_image, tmp_path):
     load(page, qtbot, make_image, tmp_path, [("a.jpg", (236, 420))])
     qtbot.mouseClick(page.quality.gemini_btn, Qt.LeftButton)
+    qtbot.waitUntil(lambda: page._copying is None, timeout=10000)
     Image.new("RGB", (2304, 4096), (240, 200, 120)).save(page.settings.downloads_dir / "g.png")
     page._exporting = True
     page._poll_downloads()
@@ -259,5 +271,6 @@ def test_missing_downloads_folder_warns(page, qtbot, make_image, tmp_path):
     page.settings.downloads_dir = tmp_path / "no_existe"
     load(page, qtbot, make_image, tmp_path, [("a.jpg", (236, 420))])
     qtbot.mouseClick(page.quality.gemini_btn, Qt.LeftButton)
+    qtbot.waitUntil(lambda: page._copying is None, timeout=10000)
     page._poll_downloads()
     assert "No se encuentra la carpeta de descargas" in page.quality.wait_label.text()

@@ -81,7 +81,7 @@ def test_very_low_ppi():
     d = analyze(info_for(), texture(), 60)
     assert d.level == QualityLevel.MUY_BAJA
     assert "Pocos píxeles para este tamaño: 60 PPI efectivos." in d.warnings
-    assert d.recommendation == "Se recomienda ampliar (Fase 3) o reducir el tamaño de impresión."
+    assert d.recommendation == "Mejórela con Gemini o reduzca el tamaño de impresión."
 
 
 def test_excellent_sharp():

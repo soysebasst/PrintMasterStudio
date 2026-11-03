@@ -16,7 +16,7 @@ pytestmark = pytest.mark.ui
 
 
 def make_page(qtbot, settings, enhancer):
-    p = JobPage(settings, load_profile(), enhancer=enhancer)
+    p = JobPage(settings, load_profile(), enhancer=enhancer, local_enhance=True)
     qtbot.addWidget(p)
     p.resize(1300, 800)
     p.show()

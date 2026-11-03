@@ -99,6 +99,7 @@ class SettingsPage(QWidget):
         lay.addWidget(price_box)
 
         ai_box = QGroupBox("Mejora con IA")
+        self.ai_box = ai_box
         form4 = QFormLayout(ai_box)
         self.enhance_check = QCheckBox("Mejorar automáticamente imágenes de baja calidad")
         self.enhance_check.setChecked(self.settings.enhance_enabled)
@@ -121,6 +122,7 @@ class SettingsPage(QWidget):
         self.install_engine_btn.clicked.connect(self._install_engine)
         self.test_engine_btn.clicked.connect(self._test_engine)
         lay.addWidget(ai_box)
+        ai_box.setVisible(False)  # fase 2D: solo Gemini; el motor local queda guardado
         self._refresh_engine_status()
 
         gem_box = QGroupBox("Gemini (gratis)")

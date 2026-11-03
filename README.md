@@ -44,7 +44,11 @@ Crea **"PrintMaster Studio"** en el Escritorio y en el menú Inicio. Abre la app
    - **Cópialo** (clic derecho › Copiar imagen) y pulsa **Ctrl+V** en la app o «Pegar mejorada».
    - Arrástralo a la zona punteada.
 
-La app conserva el largo y el precio del original y termina de ampliar la imagen en el PC si hace falta.
+La app conserva el largo y el precio del original. Descargar el resultado da la resolución completa; «Copiar imagen» de Gemini entrega una copia reducida (la app avisa).
+
+## Recortar a mano
+
+Pulsa **Recortar** sobre la vista previa: arrastra las esquinas o los bordes para elegir qué parte se imprime y el centro para mover el marco (también con las flechas). Puedes dejar el marco libre o fijarlo a la proporción original o de un favorito (por ejemplo 60 × 90). En «Largo auto», el largo y el precio salen de la zona recortada y se ven en vivo.
 
 ## Desarrollo y pruebas
 
