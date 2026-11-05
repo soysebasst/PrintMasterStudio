@@ -46,6 +46,13 @@ Crea **"PrintMaster Studio"** en el Escritorio y en el menú Inicio. Abre la app
 
 La app conserva el largo y el precio del original. Descargar el resultado da la resolución completa; «Copiar imagen» de Gemini entrega una copia reducida (la app avisa).
 
+## Largo y giro
+
+- **Largo auto:** la lámina mide justo lo que mide la imagen a 60 cm de ancho (al milímetro), sin franjas blancas. El precio se cobra por tramos de 5 cm.
+- **Escribir otro largo:** si cambias el largo, la imagen llena esa lámina (modo «Recortar») y arrastras la imagen para elegir qué parte se corta.
+- **Girar 90°:** imprime la imagen girada dentro de la misma lámina (una horizontal de 90×60 sale girada en 60×90). Con tamaño fijo se gira sola cuando así llena mejor el papel; el botón lo cambia a mano.
+- La **resolución** se ajusta solo en Configuración.
+
 ## Recortar a mano
 
 Pulsa **Recortar** sobre la vista previa: arrastra las esquinas o los bordes para elegir qué parte se imprime y el centro para mover el marco (también con las flechas). Puedes dejar el marco libre o fijarlo a la proporción original o de un favorito (por ejemplo 60 × 90). En «Largo auto», el largo y el precio salen de la zona recortada y se ven en vivo.
