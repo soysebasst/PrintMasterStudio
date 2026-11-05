@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 
@@ -26,6 +27,12 @@ def suggest_price(width_mm: Decimal, length_mm: Decimal,
     step = Decimal(cfg.round_to)
     rounded = (raw / step).quantize(Decimal(1), rounding=ROUND_HALF_UP) * step
     return max(cfg.min_price, int(rounded))
+
+
+def billable_length_mm(length_mm: Decimal, step_mm: int = 50) -> Decimal:
+    """Largo que se cobra: la lámina mide lo justo, pero se cobra por tramos (5 cm)."""
+    steps = math.ceil(float(Decimal(length_mm) / Decimal(step_mm)) - 1e-9)
+    return Decimal(max(1, steps) * step_mm)
 
 
 def format_cop(value: int) -> str:

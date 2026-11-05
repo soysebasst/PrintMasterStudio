@@ -66,8 +66,11 @@ class Inspector(QWidget):
     favorite_saved = Signal(object)  # FavoriteFormat
     enhance_choice_changed = Signal(object)  # EnhanceChoice
 
-    def __init__(self, settings: Settings, parent=None) -> None:
+    def __init__(self, settings: Settings, parent=None, *, print_options: bool = True) -> None:
+        """print_options=False: la resolución y la orientación quedan solo en Configuración
+        (la ventana principal usa la resolución por defecto y gira la imagen, no la lámina)."""
         super().__init__(parent)
+        self._print_options = print_options
         self._w_mm = Decimal(settings.roll_width_mm)
         self._h_mm = Decimal(900)
         self._unit = Unit(settings.default_unit)
@@ -204,6 +207,9 @@ class Inspector(QWidget):
         self.ppi_spin.setSuffix(" PPI")
         self.ppi_spin.setKeyboardTracking(False)
         adv.addRow("", self.ppi_spin)
+        if not print_options:
+            for w in (self.orientation_combo, self.ppi_combo, self.ppi_spin):
+                adv.setRowVisible(w, False)
         self.lossless_check = QCheckBox("Exportar sin pérdida")
         self.lossless_check.setObjectName("lossless_check")
         self.lossless_check.setChecked(True)
@@ -249,8 +255,22 @@ class Inspector(QWidget):
 
     # --- API ------------------------------------------------------------------------
     def spec(self) -> PrintSpec:
-        return PrintSpec(self._w_mm, self._h_mm, self.ppi(),
-                         Orientation(self.orientation_combo.currentData()))
+        orientation = (Orientation(self.orientation_combo.currentData()) if self._print_options
+                       else Orientation.AS_ENTERED)
+        return PrintSpec(self._w_mm, self._h_mm, self.ppi(), orientation)
+
+    def set_default_ppi(self, ppi: int) -> None:
+        """Resolución que viene de Configuración."""
+        preset = self.ppi_combo.findData(ppi)
+        self.ppi_combo.blockSignals(True)
+        self.ppi_combo.setCurrentIndex(preset if preset >= 0 else
+                                       self.ppi_combo.findData(CUSTOM_PPI))
+        self.ppi_combo.blockSignals(False)
+        self.ppi_spin.blockSignals(True)
+        self.ppi_spin.setValue(ppi)
+        self.ppi_spin.blockSignals(False)
+        self._update_visibility()
+        self._emit()
 
     def ppi(self) -> int:
         data = self.ppi_combo.currentData()
@@ -371,6 +391,9 @@ class Inspector(QWidget):
 
     def _on_height(self, value: float) -> None:
         self._h_mm = to_mm(Decimal(str(round(value, 2))), self._unit)
+        if self.mode() == FitMode.FIT_LENGTH:
+            # escribir un largo: la imagen llena esa lámina y se arrastra qué parte se corta
+            self.mode_combo.setCurrentIndex(self.mode_combo.findData(FitMode.COVER))
         self._emit()
 
     def _on_unit(self, _index: int) -> None:
@@ -387,12 +410,13 @@ class Inspector(QWidget):
 
     def _update_visibility(self) -> None:
         self._sync_mode_buttons()
-        self.ppi_spin.setVisible(self.ppi_combo.currentData() == CUSTOM_PPI)
+        self.ppi_spin.setVisible(self._print_options
+                                 and self.ppi_combo.currentData() == CUSTOM_PPI)
         fill = self.mode_combo.currentData() == FitMode.FILL
         self.background_combo.setVisible(fill)
         self.background_label.setVisible(fill)
         auto = self.mode_combo.currentData() == FitMode.FIT_LENGTH
-        self.height_spin.setReadOnly(auto)
+        self.height_spin.setReadOnly(False)  # 2E: también se puede escribir en «Largo auto»
         self.height_spin.setSuffix(" auto" if auto else "")
         if not auto:
             self._refresh_spins()

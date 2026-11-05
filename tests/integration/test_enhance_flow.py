@@ -40,7 +40,7 @@ def test_enhance_and_export(setup, tmp_path):
     assert ctrl.source_info(0).width_px == 3776
     assert item.diagnosis.level in (QualityLevel.ACEPTABLE, QualityLevel.BUENA,
                                     QualityLevel.EXCELENTE)
-    assert ctrl.page_size_for(0) == (600, 1100)
+    assert ctrl.page_size_for(0) == (600, 1068)
     assert ctrl.price_for(0) == 17000
     assert ctrl.needs_enhancement(0) == 0
     assert item.status == ItemStatus.READY
@@ -49,7 +49,7 @@ def test_enhance_and_export(setup, tmp_path):
     reader = PdfReader(str(r.output))
     xo = reader.pages[0]["/Resources"]["/XObject"]["/Im0"].get_object()
     assert xo["/Width"] >= 3500
-    assert abs(float(reader.pages[0].mediabox.height) - 1100 * 72 / 25.4) < 0.01
+    assert abs(float(reader.pages[0].mediabox.height) - 1068 * 72 / 25.4) < 0.01
     assert hashlib.sha256(src.read_bytes()).hexdigest() == before
 
 

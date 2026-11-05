@@ -10,7 +10,7 @@ from PySide6.QtGui import QIcon, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 
 ICON_NAMES = ("home", "photo-plus", "settings", "sparkles", "clipboard", "download", "plus",
-              "zoom-in", "zoom-out", "maximize", "check", "x", "crop")
+              "zoom-in", "zoom-out", "maximize", "check", "x", "crop", "rotate")
 TEXT = "#ece9f5"
 
 

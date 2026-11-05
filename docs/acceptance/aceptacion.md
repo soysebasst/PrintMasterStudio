@@ -194,3 +194,26 @@ git pull
 | ¿El recorte es cómodo? | |
 | ¿El precio se entiende a simple vista? | |
 | Comentarios | |
+
+
+---
+
+# Fase 2E — largo justo, girar dentro de la lámina, ventana más limpia
+
+## 1. Actualizar
+
+```powershell
+cd C:\PrintMaster
+git pull
+.venv\Scripts\pip install -e ".[dev]"
+```
+
+## 2. Probar
+
+- [ ] Inicio muestra solo el botón «Nuevo trabajo».
+- [ ] Una imagen casi cuadrada en «Largo auto»: la lámina sale al milímetro (ej. 60 × 61,3) y sin franjas blancas; el precio es el del tramo de 5 cm.
+- [ ] Escribe otro largo (ej. 55): pasa a «Recortar» y puedes arrastrar la imagen para elegir qué se corta.
+- [ ] Una imagen horizontal con tamaño 60 × 90 y «Ajustar»: sale girada llenando la lámina, con «Girar 90°» marcado y «· Girada» abajo.
+- [ ] El botón «Girar 90°» la gira o la deja derecha a mano.
+- [ ] En «Opciones avanzadas» ya no aparecen Orientación ni Resolución; la resolución se cambia en Configuración.
+- [ ] Exporta una girada y una de largo justo e imprímelas a «Tamaño real».

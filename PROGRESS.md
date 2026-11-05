@@ -36,6 +36,12 @@
 - Copia para Gemini en segundo plano (PNG/TIFF grandes); aviso si el resultado llega reducido
 - Cuadro de precio sugerido en el panel; «Aprobar todo» acepta las mejoradas con Gemini
 
+## Fase 2E — implementada (pendiente de validación en Windows)
+- Largo auto justo al milímetro, sin franjas; el cobro sigue por tramos de 5 cm
+- Escribir el largo pasa a «Recortar» para elegir qué se corta
+- «Girar 90°» dentro de la misma lámina (automático con tamaño fijo cuando llena mejor)
+- Resolución y orientación solo en Configuración; Inicio solo con el botón
+
 ## Siguiente
 - Fase 2: procesamiento por lotes en segundo plano con pool de procesos, pausa/reanudar/cancelar,
   persistencia en SQLite, historial y regeneración, registro de errores visible

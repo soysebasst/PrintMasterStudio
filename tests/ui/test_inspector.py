@@ -107,10 +107,10 @@ def test_defaults_fit_length_60(insp):
     assert insp.spec().width_mm == D(600)
 
 
-def test_height_readonly_in_fit_length(insp):
-    assert insp.height_spin.isReadOnly()
-    insp.mode_combo.setCurrentIndex(insp.mode_combo.findData(FitMode.CONTAIN))
+def test_height_editable_in_fit_length(insp):  # 2E: escribir el largo pasa a «Recortar»
     assert not insp.height_spin.isReadOnly()
+    insp.height_spin.setValue(55.0)
+    assert insp.mode() == FitMode.COVER and insp.spec().height_mm == D(550)
 
 
 def test_calculated_length(insp):

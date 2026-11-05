@@ -37,7 +37,7 @@ from printmaster.core.layout import page_size_mm
 from printmaster.core.layout import plan as make_plan
 from printmaster.core.naming import NamingOptions, output_path, unique_path
 from printmaster.core.pdf_writer import ExportOptions, PdfExportError, write_pdf
-from printmaster.core.pricing import suggest_price
+from printmaster.core.pricing import billable_length_mm, suggest_price
 from printmaster.domain.models import (
     Background,
     BackgroundKind,
@@ -49,6 +49,7 @@ from printmaster.domain.models import (
     ItemStatus,
     PrintSpec,
     RenderPlan,
+    rotate_region,
 )
 from printmaster.domain.quality import QualityLevel, classify
 from printmaster.infra import paths
@@ -69,7 +70,8 @@ class JobItem:
     status: ItemStatus = ItemStatus.PENDING
     diagnosis: Diagnosis | None = None
     crop: CropOffset = CropOffset()
-    region: CropRect = CropRect()  # recorte manual (fracciones de la imagen)
+    region: CropRect = CropRect()  # recorte manual (fracciones de la imagen sin girar)
+    rotate: bool | None = None  # girar 90°: None = automático (si llena mejor la lámina)
     duplicate_of: int | None = None
     error: str | None = None
     output: Path | None = None
@@ -192,7 +194,8 @@ class JobController:
         # El PPI efectivo no depende del fondo: se planifica con fondo blanco para no
         # decodificar la imagen (el color de borde requiere leerla).
         p = make_plan(self.source_info(i), self.spec, self.mode, Background(), item.crop,
-                      self.settings.length_step_mm, self._aspect(i), item.region)
+                      self.settings.length_step_mm, self._aspect(i), item.region,
+                      self.rotated(i))
         item.diagnosis = rerate(base, p.effective_ppi)
 
     def _aspect(self, i: int) -> tuple[int, int] | None:
@@ -220,6 +223,43 @@ class JobController:
         if bg != self.background:
             self.background = bg
             self._revoke_approvals()
+
+    def rotated(self, i: int, spec: PrintSpec | None = None,
+                mode: FitMode | None = None) -> bool:
+        """Si la imagen se imprime girada 90°. Automático: solo con tamaño fijo, cuando la
+        imagen es horizontal y la lámina vertical (o al revés), para llenar el rollo."""
+        return self._rotated_item(self.items[i], spec, mode)
+
+    def _rotated_item(self, item: JobItem, spec: PrintSpec | None = None,
+                      mode: FitMode | None = None) -> bool:
+        if item.rotate is not None:
+            return item.rotate
+        spec = spec or self.spec
+        mode = mode or self.mode
+        if mode == FitMode.FIT_LENGTH or item.info is None:
+            return False
+        rl, rt, rr, rb = item.region.box(item.info.width_px, item.info.height_px)
+        rw, rh = rr - rl, rb - rt
+        if rw == rh or spec.width_mm == spec.height_mm:
+            return False
+        return (rw > rh) != (spec.width_mm > spec.height_mm)
+
+    def set_rotate(self, i: int, rotate: bool | None) -> None:
+        item = self.items[i]
+        if rotate != item.rotate:
+            was = self.rotated(i)
+            item.rotate = rotate
+            if self.rotated(i) != was:
+                item.crop = CropOffset()  # el desplazamiento era de la otra orientación
+            self._revoke_approvals([i])
+
+    def view_region(self, i: int) -> CropRect:
+        """El recorte tal como se ve (en la imagen ya girada, si se gira)."""
+        region = self.items[i].region
+        return rotate_region(region) if self.rotated(i) else region
+
+    def set_view_region(self, i: int, region: CropRect) -> None:
+        self.set_region(i, rotate_region(region, inverse=True) if self.rotated(i) else region)
 
     def set_region(self, i: int, region: CropRect) -> None:
         """Recorte manual: cambia el largo automático, el precio y el PPI efectivo."""
@@ -255,12 +295,13 @@ class JobController:
     def _page_spec(self, i: int, spec: PrintSpec, mode: FitMode, step: int) -> PrintSpec:
         """Formato de página ya resuelto para el ítem (largo automático incluido)."""
         w, h = page_size_mm(self.source_info(i), spec, mode, step, self._aspect(i),
-                            self.items[i].region)
+                            self.items[i].region, self.rotated(i, spec, mode))
         return replace(spec, width_mm=w, height_mm=h)
 
     def page_size_for(self, i: int) -> tuple[Decimal, Decimal]:
         return page_size_mm(self.source_info(i), self.spec, self.mode,
-                            self.settings.length_step_mm, self._aspect(i), self.items[i].region)
+                            self.settings.length_step_mm, self._aspect(i), self.items[i].region,
+                            self.rotated(i))
 
     def has_errors(self, i: int) -> bool:
         return any(x.level == "error" for x in self.issues(i))
@@ -273,7 +314,15 @@ class JobController:
         if self.items[i].info is None or self.has_errors(i):
             return None
         w, h = self.page_size_for(i)
-        return suggest_price(w, h, self.settings.pricing())
+        return self.price_for_size(w, h)
+
+    def price_for_size(self, width_mm: Decimal, length_mm: Decimal,
+                       mode: FitMode | None = None) -> int:
+        """En «Largo auto» la lámina mide lo justo pero se cobra por tramos (5 cm); un tamaño
+        fijo se cobra por lo que mide."""
+        if (mode or self.mode) == FitMode.FIT_LENGTH:
+            length_mm = billable_length_mm(length_mm, self.settings.length_step_mm)
+        return suggest_price(width_mm, length_mm, self.settings.pricing())
 
     def total_price(self, indices: Iterable[int] | None = None) -> tuple[int, int]:
         targets = range(len(self.items)) if indices is None else indices
@@ -299,7 +348,8 @@ class JobController:
                          self.export_options, self.settings.length_step_mm)
 
     def plan_for(self, i: int, params: JobParams | None = None,
-                 crop: CropOffset | None = None, region: CropRect | None = None) -> RenderPlan:
+                 crop: CropOffset | None = None, region: CropRect | None = None,
+                 rotate: bool | None = None) -> RenderPlan:
         item = self.items[i]
         if item.info is None:
             raise ValueError(item.error or "La imagen no se pudo leer.")
@@ -307,7 +357,9 @@ class JobController:
         bg = self._resolved_background(item, params.background)
         return make_plan(self.source_info(i), params.spec, params.mode, bg,
                          crop if crop is not None else item.crop, params.length_step_mm,
-                         self._aspect(i), region if region is not None else item.region)
+                         self._aspect(i), region if region is not None else item.region,
+                         rotate if rotate is not None else self.rotated(i, params.spec,
+                                                                        params.mode))
 
     # --- diagnóstico y aprobación ---------------------------------------------------
     def analyze(self, i: int) -> Diagnosis:
@@ -322,7 +374,8 @@ class JobController:
             log.warning("%s", exc)
             raise
         orig_ppi = make_plan(item.info, self.spec, self.mode, Background(), item.crop,
-                             self.settings.length_step_mm, region=item.region).effective_ppi
+                             self.settings.length_step_mm, region=item.region,
+                             rotate=self._rotated_item(item)).effective_ppi
         item.original_diagnosis = analyze_image(item.info, proxy, orig_ppi)
         item.diagnosis = item.original_diagnosis
         # Los parámetros pudieron cambiar durante el análisis: calificar con los actuales.
@@ -340,7 +393,8 @@ class JobController:
         item = self.items[i]
         assert item.info is not None
         return make_plan(item.info, self.spec, self.mode, Background(), item.crop,
-                         self.settings.length_step_mm, region=item.region).effective_ppi
+                         self.settings.length_step_mm, region=item.region,
+                         rotate=self._rotated_item(item)).effective_ppi
 
     def needs_enhancement(self, i: int) -> int:
         """Pasadas ×4 necesarias (0 = no mejorar)."""
@@ -381,7 +435,7 @@ class JobController:
             einfo = probe(result.path)
             plan_e = make_plan(einfo, self.spec, self.mode, Background(), item.crop,
                                self.settings.length_step_mm, (info.width_px, info.height_px),
-                               item.region)
+                               item.region, self._rotated_item(item))
             if item.enhance_gen != gen:
                 # Mientras tanto se adjuntó una mejora externa (Gemini): no se sobrescribe.
                 return item.enhanced  # type: ignore[return-value]
@@ -438,7 +492,8 @@ class JobController:
 
         def ppi_of(info: ImageInfo) -> float:
             return make_plan(info, self.spec, self.mode, Background(), item.crop,
-                             self.settings.length_step_mm, aspect, item.region).effective_ppi
+                             self.settings.length_step_mm, aspect, item.region,
+                             self._rotated_item(item)).effective_ppi
 
         result = EnhanceResult(copy, "gemini-web", 0, ENGINE_GEMINI)
         final_info = ext_info
@@ -523,10 +578,11 @@ class JobController:
         today = today or date.today()
         targets = list(indices) if indices is not None else [
             i for i, it in enumerate(self.items) if it.status == ItemStatus.APPROVED]
-        jobs = [(i, self.items[i], self.items[i].crop, self.items[i].region) for i in targets]
+        jobs = [(i, self.items[i], self.items[i].crop, self.items[i].region,
+                 self.rotated(i, params.spec, params.mode)) for i in targets]
         results: list[ExportResult] = []
         total = len(jobs)
-        for k, (i, item, crop, region) in enumerate(jobs):
+        for k, (i, item, crop, region, rotate) in enumerate(jobs):
             i = self._index_of(item, i)
             try:
                 if item.info is None:
@@ -537,7 +593,7 @@ class JobController:
                 if own_errors:
                     raise ValueError(own_errors[0].message)
                 out = unique_path(output_path(out_dir, k, item.path, params.naming, today))
-                write_pdf(self.source_info(i), self.plan_for(i, params, crop, region), out,
+                write_pdf(self.source_info(i), self.plan_for(i, params, crop, region, rotate), out,
                           params.export_options)
             except (PdfExportError, ImageLoadError, ValueError, OSError) as exc:
                 item.status = ItemStatus.ERROR

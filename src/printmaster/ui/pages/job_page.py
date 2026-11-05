@@ -11,7 +11,14 @@ from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Qt, QThreadPool, QTimer, QUrl, Signal
-from PySide6.QtGui import QDesktopServices, QGuiApplication, QImage, QKeySequence, QShortcut
+from PySide6.QtGui import (
+    QDesktopServices,
+    QGuiApplication,
+    QImage,
+    QKeySequence,
+    QShortcut,
+    QTransform,
+)
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
     QApplication,
@@ -39,8 +46,14 @@ from printmaster.core.enhance.installer import find_engine
 from printmaster.core.enhance.realesrgan import EnhanceCancelled
 from printmaster.core.image_loader import SUPPORTED_EXTENSIONS, load_proxy
 from printmaster.core.pdf_writer import ExportOptions
-from printmaster.core.pricing import format_cop, suggest_price
-from printmaster.domain.models import CropRect, EnhanceChoice, FitMode, ItemStatus
+from printmaster.core.pricing import format_cop
+from printmaster.domain.models import (
+    CropRect,
+    EnhanceChoice,
+    FitMode,
+    ItemStatus,
+    rotate_region,
+)
 from printmaster.infra import paths
 from printmaster.infra.settings import FavoriteFormat, Settings
 from printmaster.printers.profiles import PrinterProfile
@@ -161,6 +174,14 @@ class JobPage(QWidget):
         self.crop_btn.setToolTip("Elegir a mano qué parte de la imagen se imprime")
         self.crop_btn.setEnabled(False)
         top_row.addWidget(self.crop_btn)
+        self.rotate_btn = QPushButton("  Girar 90°")
+        self.rotate_btn.setObjectName("segment")
+        self.rotate_btn.setCheckable(True)
+        self.rotate_btn.setIcon(icon("rotate", size=18))
+        self.rotate_btn.setToolTip("Imprimir la imagen girada dentro de la misma lámina "
+                                   "(se gira sola si así llena mejor el papel)")
+        self.rotate_btn.setEnabled(False)
+        top_row.addWidget(self.rotate_btn)
         top_row.addStretch(1)
         self.zoom_out_btn = QPushButton()
         self.fit_btn = QPushButton()
@@ -183,7 +204,7 @@ class JobPage(QWidget):
         side = QWidget()
         side_lay = QVBoxLayout(side)
         side_lay.setContentsMargins(0, 0, 0, 0)
-        self.inspector = Inspector(settings)
+        self.inspector = Inspector(settings, print_options=False)
         self.quality = QualityPanel()
         self.diagnosis = self.quality  # compatibilidad: show_diagnosis() / text()
         self.inspector.layout().insertWidget(self.inspector.quality_insert_index(), self.quality)
@@ -265,6 +286,7 @@ class JobPage(QWidget):
         self.approve_all_btn.clicked.connect(self._approve_all)
         self.export_btn.clicked.connect(self._export)
         self.crop_btn.clicked.connect(self._open_crop)
+        self.rotate_btn.clicked.connect(self._toggle_rotate)
         self.quality.use_original_btn.clicked.connect(self._toggle_use_original)
 
         self.favorite_saved = self.inspector.favorite_saved
@@ -295,6 +317,7 @@ class JobPage(QWidget):
             prefix=settings.naming_prefix, digits=settings.naming_digits,
             by_date=settings.naming_by_date)
         self.inspector.set_favorites(settings.favorites)
+        self.inspector.set_default_ppi(settings.default_ppi)
 
     # --- mensajes (sobrescribibles en pruebas) --------------------------------------
     def _info(self, title: str, text: str) -> None:
@@ -365,6 +388,11 @@ class JobPage(QWidget):
             cur >= 0 and items[cur].status in (ItemStatus.READY, ItemStatus.EXPORTED)
             and not busy)
         self.crop_btn.setEnabled(cur >= 0 and items[cur].info is not None and not busy)
+        self.rotate_btn.setEnabled(self.crop_btn.isEnabled())
+        self.rotate_btn.blockSignals(True)
+        self.rotate_btn.setChecked(cur >= 0 and items[cur].info is not None
+                                   and self.controller.rotated(cur))
+        self.rotate_btn.blockSignals(False)
         has_version = cur >= 0 and items[cur].enhanced is not None and not items[cur].enhancing
         self.quality.use_original_btn.setVisible(has_version)
         if has_version:
@@ -385,7 +413,8 @@ class JobPage(QWidget):
                 ppi = items[cur].original_diagnosis.effective_ppi
             self.info_label.setText(f"{w} × {h} cm" + (f" · {ppi:.0f} PPI efectivos"
                                                         if ppi else "")
-                                    + ("" if items[cur].region.is_full else " · Recortada"))
+                                    + ("" if items[cur].region.is_full else " · Recortada")
+                                    + (" · Girada" if self.controller.rotated(cur) else ""))
             price = self.controller.price_for(cur)
             self.inspector.set_price(price)
             self.quality.set_price(format_cop(price) if price is not None else None,
@@ -544,9 +573,14 @@ class JobPage(QWidget):
             return
         src = self.controller.source_info(row)  # el plan está en píxeles de la fuente impresa
         size = (src.width_px, src.height_px)
-        if not item.region.is_full:  # la vista previa trabaja sobre la zona recortada
-            rl, rt, rr, rb = item.region.box(*size)
-            pl, pt_, pr, pb = item.region.box(qimg.width(), qimg.height())
+        region = item.region
+        if plan.rotate:  # el plan ya está en coordenadas de la imagen girada
+            qimg = qimg.transformed(QTransform().rotate(90))
+            size = (size[1], size[0])
+            region = self.controller.view_region(row)
+        if not region.is_full:  # la vista previa trabaja sobre la zona recortada
+            rl, rt, rr, rb = region.box(*size)
+            pl, pt_, pr, pb = region.box(qimg.width(), qimg.height())
             qimg = qimg.copy(pl, pt_, pr - pl, pb - pt_)
             l, t, r, b = plan.src_box
             plan = replace(plan, src_box=(l - rl, t - rt, r - rl, b - rt))
@@ -751,7 +785,8 @@ class JobPage(QWidget):
         info = self.controller.items[row].info
         presets: list[tuple[str, float | None]] = [("Libre", None)]
         if info is not None:
-            presets.append(("Original", info.width_px / info.height_px))
+            w, h = info.width_px, info.height_px
+            presets.append(("Original", h / w if self.controller.rotated(row) else w / h))
         seen: set[float] = set()
         for fav in self.settings.favorites:
             w, h = float(fav.width), float(fav.height)
@@ -761,15 +796,27 @@ class JobPage(QWidget):
                 presets.append((fav.name, w / h))
         return presets
 
-    def _describe_crop(self, row: int, region: CropRect) -> str:
+    def _describe_crop(self, row: int, region: CropRect, rotate: bool = False) -> str:
+        """region: tal como se ve en la ventana (girada si rotate)."""
+        stored = rotate_region(region, inverse=True) if rotate else region
         try:
-            plan = self.controller.plan_for(row, region=region)
+            plan = self.controller.plan_for(row, region=stored, rotate=rotate)
         except Exception as exc:  # noqa: BLE001
             return str(exc)
         w, h = (f"{(v / 10).normalize():f}".replace(".", ",")
                 for v in (plan.page_w_mm, plan.page_h_mm))
-        price = suggest_price(plan.page_w_mm, plan.page_h_mm, self.settings.pricing())
+        price = self.controller.price_for_size(plan.page_w_mm, plan.page_h_mm)
         return f"{w} × {h} cm · {format_cop(price)} sugerido · {plan.effective_ppi:.0f} PPI"
+
+    def _toggle_rotate(self) -> None:
+        row = self._current_index()
+        if row < 0 or self._exporting or self.controller.items[row].info is None:
+            return
+        self.controller.set_rotate(row, not self.controller.rotated(row))
+        self.model.refresh(row)
+        self._show_diagnosis(row)
+        self._redraw_current()
+        self._update_state()
 
     def _open_crop(self) -> None:
         row = self._current_index()
@@ -779,14 +826,21 @@ class JobPage(QWidget):
         qimg = self._previews.get(self._preview_path(item))
         if qimg is None:
             return
-        dlg = CropDialog(qimg, item.region, self._crop_presets(row),
-                         lambda r, i=row: self._describe_crop(i, r), self)
+        rot = self.controller.rotated(row)
+        if rot:
+            qimg = qimg.transformed(QTransform().rotate(90))
+        dlg = CropDialog(qimg, self.controller.view_region(row), self._crop_presets(row),
+                         lambda r, i=row, k=rot: self._describe_crop(i, r, k), self)
         region = self._run_crop_dialog(dlg)
         dlg.deleteLater()
         row = self._row_of(item)
         if region is None or row < 0:
             return
-        self.controller.set_region(row, region)
+        if region == self.controller.view_region(row):
+            return  # sin cambios: no se revoca la aprobación
+        # el giro queda fijo: el recorte se eligió sobre la imagen tal como se veía
+        self.controller.set_rotate(row, rot)
+        self.controller.set_view_region(row, region)
         self.model.refresh(row)
         self._show_diagnosis(row)
         self._redraw_current()

@@ -14,7 +14,7 @@ def test_icons_exist_and_load(qtbot):
     for name in ICON_NAMES:
         assert folder.joinpath(f"{name}.svg").is_file(), name
         assert not icon(name).isNull(), name
-    assert len(ICON_NAMES) == 13
+    assert len(ICON_NAMES) == 14
 
 
 def test_nav_icons_and_brand(qtbot, settings):
