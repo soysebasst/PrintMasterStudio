@@ -410,7 +410,8 @@ class Inspector(QWidget):
 
     def _update_visibility(self) -> None:
         self._sync_mode_buttons()
-        self.ppi_spin.setVisible(self.ppi_combo.currentData() == CUSTOM_PPI)
+        self.ppi_spin.setVisible(self._print_options
+                                 and self.ppi_combo.currentData() == CUSTOM_PPI)
         fill = self.mode_combo.currentData() == FitMode.FILL
         self.background_combo.setVisible(fill)
         self.background_label.setVisible(fill)

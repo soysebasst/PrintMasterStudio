@@ -46,7 +46,7 @@ from printmaster.core.enhance.installer import find_engine
 from printmaster.core.enhance.realesrgan import EnhanceCancelled
 from printmaster.core.image_loader import SUPPORTED_EXTENSIONS, load_proxy
 from printmaster.core.pdf_writer import ExportOptions
-from printmaster.core.pricing import format_cop, suggest_price
+from printmaster.core.pricing import format_cop
 from printmaster.domain.models import (
     CropRect,
     EnhanceChoice,
@@ -805,7 +805,7 @@ class JobPage(QWidget):
             return str(exc)
         w, h = (f"{(v / 10).normalize():f}".replace(".", ",")
                 for v in (plan.page_w_mm, plan.page_h_mm))
-        price = suggest_price(plan.page_w_mm, plan.page_h_mm, self.settings.pricing())
+        price = self.controller.price_for_size(plan.page_w_mm, plan.page_h_mm)
         return f"{w} × {h} cm · {format_cop(price)} sugerido · {plan.effective_ppi:.0f} PPI"
 
     def _toggle_rotate(self) -> None:
@@ -836,6 +836,8 @@ class JobPage(QWidget):
         row = self._row_of(item)
         if region is None or row < 0:
             return
+        if region == self.controller.view_region(row):
+            return  # sin cambios: no se revoca la aprobación
         # el giro queda fijo: el recorte se eligió sobre la imagen tal como se veía
         self.controller.set_rotate(row, rot)
         self.controller.set_view_region(row, region)

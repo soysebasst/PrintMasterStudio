@@ -63,3 +63,9 @@ def test_render_raster_rotates_clockwise():
     assert out.width < out.height
     px = out.resize((20, 40)).getpixel((19, 0))
     assert px[0] > 200 and px[1] < 150  # el rojo quedó arriba a la derecha
+
+
+def test_short_strip_is_not_cropped_across_width():
+    p = plan(info(6000, 403), SPEC, FitMode.FIT_LENGTH)
+    l, t, r, b = p.src_box
+    assert (r - l) == 6000  # no se cortan los lados de una tira corta

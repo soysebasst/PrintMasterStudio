@@ -31,9 +31,16 @@ def _pt_to_mm(pt: float) -> Decimal:
     return Decimal(str(pt)) * Decimal("25.4") / Decimal(72)
 
 
-# En «Largo auto» la lámina se ajusta al milímetro y la imagen la llena (se pierde menos de
-# 1 mm). Si la fuente impresa tiene otra proporción (Gemini la recortó), se ajusta sin cortar.
-FIT_LENGTH_FILL_TOLERANCE = 0.02
+# En «Largo auto» la lámina se ajusta al milímetro y la imagen la llena. Solo se llena si para
+# eso se cortan como mucho 3 mm de imagen; si no (tiras muy cortas, o Gemini cambió la
+# proporción), se ajusta sin cortar.
+FIT_LENGTH_MAX_LOSS_MM = 3.0
+
+
+def _fill_loss_mm(w: float, h: float, page_w: float, page_h: float) -> float:
+    """Milímetros de imagen que se pierden al llenar la lámina (en el lado que se corta)."""
+    scale = max(page_w / w, page_h / h)
+    return max(w * scale - page_w, h * scale - page_h)
 
 
 def auto_length_mm(width_mm: Decimal, img_w: int, img_h: int, step_mm: int = 50) -> Decimal:
@@ -104,8 +111,8 @@ def plan(
     s = _resolved_spec(info, spec, mode, length_step_mm, aspect_px, region)
     page_w_pt, page_h_pt = mm_to_pt(s.width_mm), mm_to_pt(s.height_mm)
 
-    fill_length = (mode == FitMode.FIT_LENGTH
-                   and abs((W / H) / (page_w_pt / page_h_pt) - 1) <= FIT_LENGTH_FILL_TOLERANCE)
+    fill_length = mode == FitMode.FIT_LENGTH and _fill_loss_mm(
+        W, H, float(s.width_mm), float(s.height_mm)) <= FIT_LENGTH_MAX_LOSS_MM
     if mode == FitMode.COVER or fill_length:  # el largo justo también llena la lámina
         aspect = page_w_pt / page_h_pt
         if W / H > aspect:

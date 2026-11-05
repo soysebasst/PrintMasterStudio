@@ -52,3 +52,16 @@ def test_view_region_roundtrip(ctrl, make_image):
     ctrl.set_view_region(0, CropRect(0.0, 0.0, 1.0, 0.5))  # mitad de arriba, ya girada
     assert ctrl.view_region(0) == CropRect(0.0, 0.0, 1.0, 0.5)
     assert ctrl.page_size_for(0) == (600, 450)
+
+
+def test_fixed_size_billed_exactly(ctrl, make_image):
+    ctrl.add_paths([make_image("a.jpg", size=(1000, 1000))])
+    ctrl.set_spec(PrintSpec(D(600), D(470)))
+    ctrl.set_mode(FitMode.CONTAIN)
+    assert ctrl.price_for(0) == 10000  # 60 × 47 fijo: se cobra lo que mide
+
+
+def test_auto_length_billed_by_steps(ctrl, make_image):
+    ctrl.add_paths([make_image("a.jpg", size=(1000, 783))])  # 60 × 47 auto → tramo de 50
+    assert ctrl.page_size_for(0) == (600, 470)
+    assert ctrl.price_for(0) == 11000

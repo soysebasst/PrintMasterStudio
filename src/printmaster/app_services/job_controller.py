@@ -314,8 +314,15 @@ class JobController:
         if self.items[i].info is None or self.has_errors(i):
             return None
         w, h = self.page_size_for(i)
-        return suggest_price(w, billable_length_mm(h, self.settings.length_step_mm),
-                             self.settings.pricing())
+        return self.price_for_size(w, h)
+
+    def price_for_size(self, width_mm: Decimal, length_mm: Decimal,
+                       mode: FitMode | None = None) -> int:
+        """En «Largo auto» la lámina mide lo justo pero se cobra por tramos (5 cm); un tamaño
+        fijo se cobra por lo que mide."""
+        if (mode or self.mode) == FitMode.FIT_LENGTH:
+            length_mm = billable_length_mm(length_mm, self.settings.length_step_mm)
+        return suggest_price(width_mm, length_mm, self.settings.pricing())
 
     def total_price(self, indices: Iterable[int] | None = None) -> tuple[int, int]:
         targets = range(len(self.items)) if indices is None else indices

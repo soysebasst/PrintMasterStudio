@@ -97,3 +97,32 @@ def test_home_only_new_job_button(qtbot, settings):
     home.show()
     assert home.new_job_btn.isVisibleTo(home)
     assert not home.title_label.isVisibleTo(home) and not home.favorites_box.isVisibleTo(home)
+
+
+def test_custom_ppi_spin_stays_hidden(qtbot, settings):
+    settings.default_ppi = 180
+    p = JobPage(settings, load_profile())
+    qtbot.addWidget(p)
+    p.show()
+    insp = p.inspector
+    if not insp.advanced_box.isVisibleTo(p):
+        qtbot.mouseClick(insp.advanced_toggle, Qt.LeftButton)
+    insp.mode_buttons[FitMode.CONTAIN].click()
+    assert not insp.ppi_spin.isVisibleTo(p) and insp.spec().ppi == 180
+
+
+def test_crop_dialog_price_matches_card(page, qtbot, make_image, tmp_path):
+    load(page, qtbot, make_image, tmp_path, (1000, 1000))
+    seen = []
+    page._run_crop_dialog = lambda dlg: seen.append(dlg)
+    qtbot.mouseClick(page.crop_btn, Qt.LeftButton)
+    text = seen[0]._describe(CropRect(0.0, 0.0, 1.0, 0.766))  # 60 × 46 auto → se cobra 50
+    assert "60 × 46 cm" in text and "$11.000" in text
+
+
+def test_unchanged_crop_keeps_approval(page, qtbot, make_image, tmp_path):
+    load(page, qtbot, make_image, tmp_path, (1000, 1000))
+    page.controller.approve(0)
+    page._run_crop_dialog = lambda dlg: dlg.crop_rect()
+    qtbot.mouseClick(page.crop_btn, Qt.LeftButton)
+    assert page.controller.items[0].status == ItemStatus.APPROVED
