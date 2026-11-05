@@ -43,11 +43,11 @@ def test_attach_gemini_result(ctrl, tmp_path):
     assert res.aspect_warning is False
     assert res.result.engine == ENGINE_GEMINI
     assert ctrl.source_info(0).width_px == 2304
-    assert ctrl.page_size_for(0) == (600, 1100) and ctrl.price_for(0) == 17000
+    assert ctrl.page_size_for(0) == (600, 1068) and ctrl.price_for(0) == 17000
     ctrl.approve(0)
     (r,) = ctrl.export(None, tmp_path / "out", today=date(2026, 11, 2))
     box = PdfReader(str(r.output)).pages[0].mediabox
-    assert abs(float(box.height) - 1100 * 72 / 25.4) < 0.01
+    assert abs(float(box.height) - 1068 * 72 / 25.4) < 0.01
     assert (sha(src), sha(orig)) == before
     assert src.exists()
 
@@ -62,7 +62,7 @@ def test_low_res_gemini_gets_local_pass(ctrl, tmp_path, fake_engine_cmd):
 def test_aspect_mismatch_fits_without_distortion(ctrl, tmp_path):
     res = ctrl.attach_external(0, gemini_png(tmp_path, (1024, 1024)))
     assert res.aspect_warning is True
-    assert ctrl.page_size_for(0) == (600, 1100)
+    assert ctrl.page_size_for(0) == (600, 1068)
     x, y, w, h = ctrl.plan_for(0).dest_rect_pt
     assert abs(w / h - 1.0) < 0.01
 

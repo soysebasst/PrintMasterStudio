@@ -7,6 +7,7 @@ Coordenadas de destino en puntos PDF con origen abajo a la izquierda.
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 from decimal import Decimal
 
 from printmaster.domain.models import (
@@ -19,6 +20,7 @@ from printmaster.domain.models import (
     Orientation,
     PrintSpec,
     RenderPlan,
+    rotate_region,
 )
 from printmaster.domain.units import mm_to_pt, mm_to_px
 
@@ -27,6 +29,11 @@ DOWNSAMPLE_TOLERANCE = 1.01
 
 def _pt_to_mm(pt: float) -> Decimal:
     return Decimal(str(pt)) * Decimal("25.4") / Decimal(72)
+
+
+# En «Largo auto» la lámina se ajusta al milímetro y la imagen la llena (se pierde menos de
+# 1 mm). Si la fuente impresa tiene otra proporción (Gemini la recortó), se ajusta sin cortar.
+FIT_LENGTH_FILL_TOLERANCE = 0.02
 
 
 def auto_length_mm(width_mm: Decimal, img_w: int, img_h: int, step_mm: int = 50) -> Decimal:
@@ -47,8 +54,8 @@ def _resolved_spec(info: ImageInfo, spec: PrintSpec, mode: FitMode,
         aw, ah = aspect_px or (info.width_px, info.height_px)
         rw, rh = _region_dims(aw, ah, region)
         exact = Decimal(spec.width_mm) * Decimal(repr(rh)) / Decimal(repr(rw))
-        steps = math.ceil(float(exact / Decimal(length_step_mm)) - 1e-9)
-        length = Decimal(max(1, steps) * length_step_mm)
+        # lámina justa (al milímetro, hacia arriba): sin franjas; el cobro va por tramos
+        length = Decimal(max(1, math.ceil(float(exact) - 1e-9)))
         return PrintSpec(spec.width_mm, length, spec.ppi, Orientation.AS_ENTERED)
     rw, rh = _region_dims(info.width_px, info.height_px, region)
     return spec.resolved_for(max(1, round(rw)), max(1, round(rh)))
@@ -57,12 +64,22 @@ def _resolved_spec(info: ImageInfo, spec: PrintSpec, mode: FitMode,
 def page_size_mm(info: ImageInfo, spec: PrintSpec, mode: FitMode,
                  length_step_mm: int = 50,
                  aspect_px: tuple[int, int] | None = None,
-                 region: CropRect = CropRect()) -> tuple[Decimal, Decimal]:
+                 region: CropRect = CropRect(),
+                 rotate: bool = False) -> tuple[Decimal, Decimal]:
     """aspect_px: proporción para el largo automático (la del original, aunque se imprima la
     versión mejorada, cuyo redondeo de píxeles podría cambiar el largo). region: recorte
     manual, en fracciones de la imagen."""
+    if rotate:
+        info, region, aspect_px = _rotated(info, region, aspect_px)
     s = _resolved_spec(info, spec, mode, length_step_mm, aspect_px, region)
     return s.width_mm, s.height_mm
+
+
+def _rotated(info: ImageInfo, region: CropRect, aspect_px: tuple[int, int] | None):
+    """Datos de la imagen como si ya estuviera girada 90° a la derecha."""
+    turned = replace(info, width_px=info.height_px, height_px=info.width_px)
+    aspect = (aspect_px[1], aspect_px[0]) if aspect_px else None
+    return turned, rotate_region(region), aspect
 
 
 def plan(
@@ -74,15 +91,22 @@ def plan(
     length_step_mm: int = 50,
     aspect_px: tuple[int, int] | None = None,
     region: CropRect = CropRect(),
+    rotate: bool = False,
 ) -> RenderPlan:
+    """rotate: imprime la imagen girada 90° a la derecha (src_box queda en coordenadas de la
+    imagen girada y no se incrusta el JPEG original)."""
     if background.kind == BackgroundKind.EDGE_COLOR:
         raise ValueError("El color de borde debe resolverse antes de planificar.")
+    if rotate:
+        info, region, aspect_px = _rotated(info, region, aspect_px)
     rl, rt, rr, rb = region.box(info.width_px, info.height_px)
     W, H = rr - rl, rb - rt  # se planifica sobre la zona recortada
     s = _resolved_spec(info, spec, mode, length_step_mm, aspect_px, region)
     page_w_pt, page_h_pt = mm_to_pt(s.width_mm), mm_to_pt(s.height_mm)
 
-    if mode == FitMode.COVER:
+    fill_length = (mode == FitMode.FIT_LENGTH
+                   and abs((W / H) / (page_w_pt / page_h_pt) - 1) <= FIT_LENGTH_FILL_TOLERANCE)
+    if mode == FitMode.COVER or fill_length:  # el largo justo también llena la lámina
         aspect = page_w_pt / page_h_pt
         if W / H > aspect:
             sh = H
@@ -128,6 +152,7 @@ def plan(
         and info.exif_orientation in {0, 1}
         and output_px is None
         and not compose_page
+        and not rotate
     )
     return RenderPlan(
         page_w_mm=s.width_mm,
@@ -141,6 +166,7 @@ def plan(
         background=background,
         effective_ppi=eff,
         passthrough=passthrough,
+        rotate=rotate,
     )
 
 

@@ -27,7 +27,7 @@ def test_price_per_item_and_total(ctrl, make_image, tmp_path):
     ctrl.add_paths([a, b])
     assert ctrl.price_for(0) == 12000 and ctrl.price_for(1) == 17000
     assert ctrl.total_price() == (2, 29000)
-    assert ctrl.page_size_for(1) == (600, 1100)
+    assert ctrl.page_size_for(1) == (600, 1068)
 
 
 def test_export_fit_length_sizes(ctrl, make_image, tmp_path):
@@ -38,7 +38,7 @@ def test_export_fit_length_sizes(ctrl, make_image, tmp_path):
         box = PdfReader(str(r.output)).pages[0].mediabox
         sizes.append((round(float(box.width), 2), round(float(box.height), 2)))
     assert sizes == [(round(mm_to_pt(600), 2), round(mm_to_pt(600), 2)),
-                     (round(mm_to_pt(600), 2), round(mm_to_pt(1100), 2))]
+                     (round(mm_to_pt(600), 2), round(mm_to_pt(1068), 2))]
 
 
 def test_very_tall_image_too_long(ctrl, make_image):
@@ -48,7 +48,7 @@ def test_very_tall_image_too_long(ctrl, make_image):
 
 def test_panoramic(ctrl, make_image):
     ctrl.add_paths([make_image("pano.jpg", size=(3000, 100))])
-    assert ctrl.page_size_for(0) == (600, 50)
+    assert ctrl.page_size_for(0) == (600, 20)  # 2E: largo justo
     assert ctrl.price_for(0) == 10000
 
 

@@ -35,6 +35,8 @@ def _compose_blur_page(img: Image.Image, size: tuple[int, int]) -> Image.Image:
 
 def render_raster(img: Image.Image, plan: RenderPlan, keep_alpha: bool = False) -> Image.Image:
     """Imagen final en píxeles lista para incrustar en el PDF."""
+    if plan.rotate:
+        img = img.transpose(Image.Transpose.ROTATE_270)  # 90° a la derecha
     out = img.crop(plan.src_box) if plan.src_box != (0, 0, img.width, img.height) else img
     if plan.compose_page:
         assert plan.output_px is not None

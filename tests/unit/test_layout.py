@@ -126,7 +126,8 @@ def test_properties(w, h, pw, ph, mode, cx, cy):
     assert x + dw <= p.page_w_pt + eps and y + dh <= p.page_h_pt + eps
     l, t, r, b = p.src_box
     assert 0 <= l < r <= w and 0 <= t < b <= h
-    if mode == FitMode.COVER:
+    fills = abs(dw - p.page_w_pt) < eps and abs(dh - p.page_h_pt) < eps
+    if mode == FitMode.COVER or (mode == FitMode.FIT_LENGTH and fills):  # 2E: llena la lámina
         target = p.page_w_pt / p.page_h_pt
         sw, sh = r - l, b - t
         # proporción conservada a ±1 px

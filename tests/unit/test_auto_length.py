@@ -32,10 +32,10 @@ def test_auto_length_properties(w, h):
 
 def test_fit_length_plan():
     p = plan(info(236, 420), PrintSpec(D(600), D(900)), FitMode.FIT_LENGTH)
-    assert (p.page_w_mm, p.page_h_mm) == (D(600), D(1100))
+    assert (p.page_w_mm, p.page_h_mm) == (D(600), D(1068))  # 2E: largo justo al mm
     x, y, w, h = p.dest_rect_pt
     assert abs(w - p.page_w_pt) < 1e-6 and abs(x) < 1e-6
-    assert abs(y - (p.page_h_pt - h) / 2) < 1e-6
+    assert abs(y) < 1e-6 and abs(h - p.page_h_pt) < 1e-6  # sin franjas
 
 
 def test_fit_length_landscape_not_rotated():

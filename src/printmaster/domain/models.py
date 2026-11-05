@@ -92,6 +92,13 @@ class CropRect:
         return left, top, right, bottom
 
 
+def rotate_region(region: CropRect, inverse: bool = False) -> CropRect:
+    """Recorte en coordenadas de la imagen girada 90° a la derecha (o de vuelta)."""
+    if inverse:  # (x', y') → (y', 1 - x')
+        return CropRect(region.y0, 1 - region.x1, region.y1, 1 - region.x0)
+    return CropRect(1 - region.y1, region.x0, 1 - region.y0, region.x1)  # (x, y) → (1 - y, x)
+
+
 @dataclass(frozen=True)
 class PrintSpec:
     width_mm: Decimal
@@ -145,3 +152,4 @@ class RenderPlan:
     background: Background
     effective_ppi: float
     passthrough: bool
+    rotate: bool = False  # la imagen se gira 90° a la derecha antes de recortar (src_box)
